@@ -65,23 +65,28 @@ app.get("/status/:jobId", (req, res) => {
 app.get("/download/:jobId", (req, res) => {
   const job = jobs.get(req.params.jobId);
 
-  if (!job || job.status !== "finished" || !job.outputFile) {
-    return res.status(404).send("File is not ready.");
-  }
-
-  if (!fs.existsSync(job.outputFile)) {
+  if (!job || job.status !== "finished" || !job.outputBuffer) {
     return res.status(404).send("Output file no longer exists.");
   }
 
-  res.download(
-    job.outputFile,
-    job.filename,
-    () => {
-      try {
-        fs.unlinkSync(job.outputFile);
-      } catch {}
-    }
+  res.setHeader(
+    "Content-Type",
+    "application/pdf"
   );
+
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="${job.filename}"`
+  );
+
+  res.setHeader(
+    "Content-Length",
+    job.outputBuffer.length
+  );
+
+  res.send(job.outputBuffer);
+
+  jobs.delete(req.params.jobId);
 });
 
 app.post("/convert", upload.single("file"), (req, res) => {
@@ -152,10 +157,12 @@ app.post("/convert", upload.single("file"), (req, res) => {
     inputPath
   );
 
+  const outputFilename =
+    `${path.parse(safeName).name}.${outputFormat}`;
+
   jobs.set(jobId, {
     status: "processing",
-    filename:
-      `${path.parse(safeName).name}.${outputFormat}`
+    filename: outputFilename
   });
 
   res.json({
@@ -216,12 +223,26 @@ app.post("/convert", upload.single("file"), (req, res) => {
         files[0]
       );
 
-      jobs.set(jobId, {
-        status: "finished",
-        outputFile,
-        filename:
-          `${path.parse(safeName).name}.${outputFormat}`
-      });
+      try {
+        const outputBuffer =
+          fs.readFileSync(outputFile);
+
+        jobs.set(jobId, {
+          status: "finished",
+          outputBuffer,
+          filename: outputFilename
+        });
+
+        try {
+          fs.unlinkSync(outputFile);
+        } catch {}
+
+      } catch {
+        jobs.set(jobId, {
+          status: "error",
+          error: "Unable to read conversion output."
+        });
+      }
     }
   );
 });
