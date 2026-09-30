@@ -6,6 +6,18 @@ const { execFile } = require("child_process");
 
 const app = express();
 
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(204);
+  }
+
+  next();
+});
+
 const upload = multer({
   dest: "/tmp/uploads"
 });
@@ -80,7 +92,10 @@ app.post("/convert", upload.single("file"), (req, res) => {
     });
   }
 
-  const tool = String(req.body.tool || "");
+  const tool = String(req.body.tool || "")
+    .trim()
+    .toLowerCase();
+
   const jobId = String(req.body.jobId || "");
 
   if (!jobId) {
@@ -105,12 +120,16 @@ app.post("/convert", upload.single("file"), (req, res) => {
 
     return res.status(400).json({
       success: false,
-      error: "Unsupported conversion tool."
+      error: "Unsupported conversion tool: " + tool
     });
   }
 
   const originalName =
-    String(req.body.filename || req.file.originalname || "file");
+    String(
+      req.body.filename ||
+      req.file.originalname ||
+      "file"
+    );
 
   const safeName = path.basename(originalName);
 
@@ -128,7 +147,10 @@ app.post("/convert", upload.single("file"), (req, res) => {
     recursive: true
   });
 
-  fs.renameSync(req.file.path, inputPath);
+  fs.renameSync(
+    req.file.path,
+    inputPath
+  );
 
   jobs.set(jobId, {
     status: "processing",
@@ -167,7 +189,18 @@ app.post("/convert", upload.single("file"), (req, res) => {
         return;
       }
 
-      const files = fs.readdirSync(outputDir);
+      let files = [];
+
+      try {
+        files = fs.readdirSync(outputDir);
+      } catch {
+        jobs.set(jobId, {
+          status: "error",
+          error: "Unable to read conversion output."
+        });
+
+        return;
+      }
 
       if (!files.length) {
         jobs.set(jobId, {
@@ -197,10 +230,15 @@ function getBaseUrl(req) {
   return `${req.protocol}://${req.get("host")}`;
 }
 
-const PORT = process.env.PORT || 10000;
+const PORT =
+  process.env.PORT || 10000;
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(
-    `Conversion engine running on port ${PORT}`
-  );
-});
+app.listen(
+  PORT,
+  "0.0.0.0",
+  () => {
+    console.log(
+      `Conversion engine running on port ${PORT}`
+    );
+  }
+);
