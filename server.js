@@ -46,7 +46,10 @@ app.get("/status/:jobId", (req, res) => {
   if (job.status === "finished") {
     return res.json({
       status: "finished",
-      url: `${getBaseUrl(req)}/download/${req.params.jobId}`,
+      url:
+        getBaseUrl(req) +
+        "/download/" +
+        req.params.jobId,
       filename: job.filename
     });
   }
@@ -66,8 +69,14 @@ app.get("/status/:jobId", (req, res) => {
 app.get("/download/:jobId", (req, res) => {
   const job = jobs.get(req.params.jobId);
 
-  if (!job || job.status !== "finished" || !job.outputBuffer) {
-    return res.status(404).send("Output file no longer exists.");
+  if (
+    !job ||
+    job.status !== "finished" ||
+    !job.outputBuffer
+  ) {
+    return res
+      .status(404)
+      .send("Output file no longer exists.");
   }
 
   res.setHeader(
@@ -77,7 +86,9 @@ app.get("/download/:jobId", (req, res) => {
 
   res.setHeader(
     "Content-Disposition",
-    `attachment; filename="${job.filename}"`
+    'attachment; filename="' +
+      job.filename +
+      '"'
   );
 
   res.setHeader(
@@ -98,169 +109,206 @@ app.get("/download/:jobId", (req, res) => {
   res.send(job.outputBuffer);
 });
 
-app.post("/convert", upload.single("file"), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({
-      success: false,
-      error: "No file uploaded."
+app.post(
+  "/convert",
+  upload.single("file"),
+  (req, res) => {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: "No file uploaded."
+      });
+    }
+
+    const tool = String(
+      req.body.tool || ""
+    )
+      .trim()
+      .toLowerCase();
+
+    const jobId = String(
+      req.body.jobId || ""
+    );
+
+    if (!jobId) {
+      fs.unlink(req.file.path, () => {});
+
+      return res.status(400).json({
+        success: false,
+        error: "Missing job id."
+      });
+    }
+
+    const allowedTools = {
+      "word-to-pdf": "pdf",
+      "powerpoint-to-pdf": "pdf",
+      "excel-to-pdf": "pdf"
+    };
+
+    const outputFormat =
+      allowedTools[tool];
+
+    if (!outputFormat) {
+      fs.unlink(req.file.path, () => {});
+
+      return res.status(400).json({
+        success: false,
+        error:
+          "Unsupported conversion tool: " +
+          tool
+      });
+    }
+
+    const originalName = String(
+      req.body.filename ||
+        req.file.originalname ||
+        "file"
+    );
+
+    const safeName =
+      path.basename(originalName);
+
+    const inputPath = path.join(
+      "/tmp/uploads",
+      jobId + "-" + safeName
+    );
+
+    const outputDir = path.join(
+      "/tmp/output",
+      jobId
+    );
+
+    fs.mkdirSync(outputDir, {
+      recursive: true
     });
-  }
 
-  const tool = String(req.body.tool || "")
-    .trim()
-    .toLowerCase();
-
-  const jobId = String(req.body.jobId || "");
-
-  if (!jobId) {
-    fs.unlink(req.file.path, () => {});
-
-    return res.status(400).json({
-      success: false,
-      error: "Missing job id."
-    });
-  }
-
-  const allowedTools = {
-    "word-to-pdf": "pdf",
-    "powerpoint-to-pdf": "pdf",
-    "excel-to-pdf": "pdf"
-  };
-
-  const outputFormat = allowedTools[tool];
-
-  if (!outputFormat) {
-    fs.unlink(req.file.path, () => {});
-
-    return res.status(400).json({
-      success: false,
-      error: "Unsupported conversion tool: " + tool
-    });
-  }
-
-  const originalName = String(
-    req.body.filename ||
-    req.file.originalname ||
-    "file"
-  );
-
-  const safeName = path.basename(originalName);
-
-  const inputPath = path.join(
-    "/tmp/uploads",
-    `${jobId}-${safeName}`
-  );
-
-  const outputDir = path.join(
-    "/tmp/output",
-    jobId
-  );
-
-  fs.mkdirSync(outputDir, {
-    recursive: true
-  });
-
-  fs.renameSync(
-    req.file.path,
-    inputPath
-  );
-
-  const outputFilename =
-    `${path.parse(safeName).name}.${outputFormat}`;
-
-  jobs.set(jobId, {
-    status: "processing",
-    filename: outputFilename
-  });
-
-  res.json({
-    success: true,
-    jobId,
-    status: "processing"
-  });
-
-  execFile(
-    "libreoffice",
-    [
-      "--headless",
-      "--convert-to",
-      outputFormat,
-      "--outdir",
-      outputDir,
+    fs.renameSync(
+      req.file.path,
       inputPath
-    ],
-    (error) => {
-      try {
-        fs.unlinkSync(inputPath);
-      } catch {}
+    );
 
-      if (error) {
-        jobs.set(jobId, {
-          status: "error",
-          error: "LibreOffice conversion failed."
-        });
+    const outputFilename =
+      path.parse(safeName).name +
+      "." +
+      outputFormat;
 
-        return;
-      }
+    jobs.set(jobId, {
+      status: "processing",
+      filename: outputFilename
+    });
 
-      let files = [];
+    res.json({
+      success: true,
+      jobId: jobId,
+      status: "processing"
+    });
 
-      try {
-        files = fs.readdirSync(outputDir);
-      } catch {
-        jobs.set(jobId, {
-          status: "error",
-          error: "Unable to read conversion output."
-        });
-
-        return;
-      }
-
-      if (!files.length) {
-        jobs.set(jobId, {
-          status: "error",
-          error: "Conversion output was not created."
-        });
-
-        return;
-      }
-
-      const outputFile = path.join(
+    execFile(
+      "libreoffice",
+      [
+        "--headless",
+        "--convert-to",
+        outputFormat,
+        "--outdir",
         outputDir,
-        files[0]
-      );
-
-      try {
-        const outputBuffer =
-          fs.readFileSync(outputFile);
-
-        jobs.set(jobId, {
-          status: "finished",
-          outputBuffer,
-          filename: outputFilename,
-          contentType: "application/pdf"
-        });
-
+        inputPath
+      ],
+      (error) => {
         try {
-          fs.unlinkSync(outputFile);
+          fs.unlinkSync(inputPath);
         } catch {}
 
-        setTimeout(() => {
-          jobs.delete(jobId);
-        }, 10 * 60 * 1000);
+        if (error) {
+          jobs.set(jobId, {
+            status: "error",
+            error:
+              "LibreOffice conversion failed."
+          });
 
-      } catch {
-        jobs.set(jobId, {
-          status: "error",
-          error: "Unable to read conversion output."
-        });
+          return;
+        }
+
+        let files = [];
+
+        try {
+          files =
+            fs.readdirSync(outputDir);
+        } catch {
+          jobs.set(jobId, {
+            status: "error",
+            error:
+              "Unable to read conversion output."
+          });
+
+          return;
+        }
+
+        if (!files.length) {
+          jobs.set(jobId, {
+            status: "error",
+            error:
+              "Conversion output was not created."
+          });
+
+          return;
+        }
+
+        const outputFile =
+          path.join(
+            outputDir,
+            files[0]
+          );
+
+        try {
+          const outputBuffer =
+            fs.readFileSync(
+              outputFile
+            );
+
+          jobs.set(jobId, {
+            status: "finished",
+            outputBuffer:
+              outputBuffer,
+            filename:
+              outputFilename,
+            contentType:
+              "application/pdf"
+          });
+
+          try {
+            fs.unlinkSync(
+              outputFile
+            );
+          } catch {}
+
+          try {
+            fs.rmdirSync(
+              outputDir
+            );
+          } catch {}
+
+          setTimeout(() => {
+            jobs.delete(jobId);
+          }, 10 * 60 * 1000);
+
+        } catch {
+          jobs.set(jobId, {
+            status: "error",
+            error:
+              "Unable to read conversion output."
+          });
+        }
       }
-    }
-  );
-});
+    );
+  }
+);
 
 function getBaseUrl(req) {
-  return `${req.protocol}://${req.get("host")}`;
+  return (
+    req.protocol +
+    "://" +
+    req.get("host")
+  );
 }
 
 const PORT =
@@ -271,7 +319,8 @@ app.listen(
   "0.0.0.0",
   () => {
     console.log(
-      `Conversion engine running on port ${PORT}`
+      "Conversion engine running on port " +
+        PORT
     );
   }
 );
