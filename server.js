@@ -1,3 +1,4 @@
+```javascript
 const express = require("express");
 const multer = require("multer");
 const fs = require("fs");
@@ -71,7 +72,7 @@ app.get("/download/:jobId", (req, res) => {
 
   res.setHeader(
     "Content-Type",
-    "application/pdf"
+    job.contentType || "application/pdf"
   );
 
   res.setHeader(
@@ -84,9 +85,17 @@ app.get("/download/:jobId", (req, res) => {
     job.outputBuffer.length
   );
 
-  res.send(job.outputBuffer);
+  res.setHeader(
+    "Cache-Control",
+    "no-store, no-cache, must-revalidate"
+  );
 
-  jobs.delete(req.params.jobId);
+  res.setHeader(
+    "Pragma",
+    "no-cache"
+  );
+
+  res.send(job.outputBuffer);
 });
 
 app.post("/convert", upload.single("file"), (req, res) => {
@@ -129,12 +138,11 @@ app.post("/convert", upload.single("file"), (req, res) => {
     });
   }
 
-  const originalName =
-    String(
-      req.body.filename ||
-      req.file.originalname ||
-      "file"
-    );
+  const originalName = String(
+    req.body.filename ||
+    req.file.originalname ||
+    "file"
+  );
 
   const safeName = path.basename(originalName);
 
@@ -182,7 +190,6 @@ app.post("/convert", upload.single("file"), (req, res) => {
       inputPath
     ],
     (error) => {
-
       try {
         fs.unlinkSync(inputPath);
       } catch {}
@@ -230,12 +237,17 @@ app.post("/convert", upload.single("file"), (req, res) => {
         jobs.set(jobId, {
           status: "finished",
           outputBuffer,
-          filename: outputFilename
+          filename: outputFilename,
+          contentType: "application/pdf"
         });
 
         try {
           fs.unlinkSync(outputFile);
         } catch {}
+
+        setTimeout(() => {
+          jobs.delete(jobId);
+        }, 10 * 60 * 1000);
 
       } catch {
         jobs.set(jobId, {
@@ -263,3 +275,4 @@ app.listen(
     );
   }
 );
+```
