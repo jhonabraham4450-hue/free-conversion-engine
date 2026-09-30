@@ -10,12 +10,66 @@ const upload = multer({
   dest: "/tmp/uploads"
 });
 
+const jobs = new Map();
+
 app.get("/", (req, res) => {
   res.json({
     success: true,
     service: "iLovePDF4 Free Conversion Engine",
     status: "online"
   });
+});
+
+app.get("/status/:jobId", (req, res) => {
+  const job = jobs.get(req.params.jobId);
+
+  if (!job) {
+    return res.status(404).json({
+      status: "error",
+      error: "Job not found."
+    });
+  }
+
+  if (job.status === "finished") {
+    return res.json({
+      status: "finished",
+      url: `${getBaseUrl(req)}/download/${req.params.jobId}`,
+      filename: job.filename
+    });
+  }
+
+  if (job.status === "error") {
+    return res.json({
+      status: "error",
+      error: job.error || "Conversion failed."
+    });
+  }
+
+  return res.json({
+    status: "processing"
+  });
+});
+
+app.get("/download/:jobId", (req, res) => {
+  const job = jobs.get(req.params.jobId);
+
+  if (!job || job.status !== "finished" || !job.outputFile) {
+    return res.status(404).send("File is not ready.");
+  }
+
+  if (!fs.existsSync(job.outputFile)) {
+    return res.status(404).send("Output file no longer exists.");
+  }
+
+  res.download(
+    job.outputFile,
+    job.filename,
+    () => {
+      try {
+        fs.unlinkSync(job.outputFile);
+      } catch {}
+    }
+  );
 });
 
 app.post("/convert", upload.single("file"), (req, res) => {
@@ -27,17 +81,27 @@ app.post("/convert", upload.single("file"), (req, res) => {
   }
 
   const tool = String(req.body.tool || "");
-  const input = req.file.path;
-  const originalName = req.file.originalname;
+  const jobId = String(req.body.jobId || "");
 
-  let outputFormat = null;
+  if (!jobId) {
+    fs.unlink(req.file.path, () => {});
 
-  if (tool === "word-to-pdf") outputFormat = "pdf";
-  if (tool === "powerpoint-to-pdf") outputFormat = "pdf";
-  if (tool === "excel-to-pdf") outputFormat = "pdf";
+    return res.status(400).json({
+      success: false,
+      error: "Missing job id."
+    });
+  }
+
+  const allowedTools = {
+    "word-to-pdf": "pdf",
+    "powerpoint-to-pdf": "pdf",
+    "excel-to-pdf": "pdf"
+  };
+
+  const outputFormat = allowedTools[tool];
 
   if (!outputFormat) {
-    fs.unlink(input, () => {});
+    fs.unlink(req.file.path, () => {});
 
     return res.status(400).json({
       success: false,
@@ -45,10 +109,37 @@ app.post("/convert", upload.single("file"), (req, res) => {
     });
   }
 
-  const outputDir = "/tmp/output";
+  const originalName =
+    String(req.body.filename || req.file.originalname || "file");
+
+  const safeName = path.basename(originalName);
+
+  const inputPath = path.join(
+    "/tmp/uploads",
+    `${jobId}-${safeName}`
+  );
+
+  const outputDir = path.join(
+    "/tmp/output",
+    jobId
+  );
 
   fs.mkdirSync(outputDir, {
     recursive: true
+  });
+
+  fs.renameSync(req.file.path, inputPath);
+
+  jobs.set(jobId, {
+    status: "processing",
+    filename:
+      `${path.parse(safeName).name}.${outputFormat}`
+  });
+
+  res.json({
+    success: true,
+    jobId,
+    status: "processing"
   });
 
   execFile(
@@ -59,28 +150,32 @@ app.post("/convert", upload.single("file"), (req, res) => {
       outputFormat,
       "--outdir",
       outputDir,
-      input
+      inputPath
     ],
     (error) => {
 
-      if (error) {
-        fs.unlink(input, () => {});
+      try {
+        fs.unlinkSync(inputPath);
+      } catch {}
 
-        return res.status(500).json({
-          success: false,
+      if (error) {
+        jobs.set(jobId, {
+          status: "error",
           error: "LibreOffice conversion failed."
         });
+
+        return;
       }
 
       const files = fs.readdirSync(outputDir);
 
       if (!files.length) {
-        fs.unlink(input, () => {});
-
-        return res.status(500).json({
-          success: false,
+        jobs.set(jobId, {
+          status: "error",
           error: "Conversion output was not created."
         });
+
+        return;
       }
 
       const outputFile = path.join(
@@ -88,17 +183,19 @@ app.post("/convert", upload.single("file"), (req, res) => {
         files[0]
       );
 
-      res.download(
+      jobs.set(jobId, {
+        status: "finished",
         outputFile,
-        `${path.parse(originalName).name}.${outputFormat}`,
-        () => {
-          fs.unlink(input, () => {});
-          fs.unlink(outputFile, () => {});
-        }
-      );
+        filename:
+          `${path.parse(safeName).name}.${outputFormat}`
+      });
     }
   );
 });
+
+function getBaseUrl(req) {
+  return `${req.protocol}://${req.get("host")}`;
+}
 
 const PORT = process.env.PORT || 10000;
 
