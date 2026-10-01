@@ -339,17 +339,34 @@ app.post(
      * LibreOffice conversion
      */
 
-    execFile(
-      "libreoffice",
-      [
+    const libreOfficeArgs =
+  tool === "pdf-to-word"
+    ? [
+        "--headless",
+        "--infilter=writer_pdf_import",
+        "--convert-to",
+        "docx:MS Word 2007 XML",
+        "--outdir",
+        jobOutputDir,
+        inputPath
+      ]
+    : [
         "--headless",
         "--convert-to",
         conversion.format,
         "--outdir",
         jobOutputDir,
         inputPath
-      ],
-      {
+      ];
+
+execFile(
+  "libreoffice",
+  libreOfficeArgs,
+  {
+    timeout: 180000,
+    maxBuffer: 10 * 1024 * 1024
+  },
+  (error, stdout, stderr) => {
         timeout: 180000,
         maxBuffer: 10 * 1024 * 1024
       },
