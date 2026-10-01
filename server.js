@@ -6,20 +6,16 @@ const { execFile } = require("child_process");
 
 const app = express();
 
+app.use(express.json({ limit: "10mb" }));
+
 /* =========================
    CORS
 ========================= */
 
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
-  res.header(
-    "Access-Control-Allow-Methods",
-    "GET,POST,OPTIONS"
-  );
-  res.header(
-    "Access-Control-Allow-Headers",
-    "Content-Type"
-  );
+  res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type");
 
   if (req.method === "OPTIONS") {
     return res.sendStatus(204);
@@ -35,13 +31,8 @@ app.use((req, res, next) => {
 const UPLOAD_DIR = "/tmp/uploads";
 const OUTPUT_DIR = "/tmp/output";
 
-fs.mkdirSync(UPLOAD_DIR, {
-  recursive: true
-});
-
-fs.mkdirSync(OUTPUT_DIR, {
-  recursive: true
-});
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 
 /* =========================
    UPLOAD
@@ -58,7 +49,7 @@ const upload = multer({
 const jobs = new Map();
 
 /* =========================
-   HOME / HEALTH CHECK
+   HOME / HEALTH
 ========================= */
 
 app.get("/", (req, res) => {
@@ -75,7 +66,6 @@ app.get("/", (req, res) => {
 
 app.get("/status/:jobId", (req, res) => {
   const jobId = req.params.jobId;
-
   const job = jobs.get(jobId);
 
   if (!job) {
@@ -99,9 +89,7 @@ app.get("/status/:jobId", (req, res) => {
   if (job.status === "error") {
     return res.json({
       status: "error",
-      error:
-        job.error ||
-        "Conversion failed."
+      error: job.error || "Conversion failed."
     });
   }
 
@@ -116,7 +104,6 @@ app.get("/status/:jobId", (req, res) => {
 
 app.get("/download/:jobId", (req, res) => {
   const jobId = req.params.jobId;
-
   const job = jobs.get(jobId);
 
   if (
@@ -152,10 +139,7 @@ app.get("/download/:jobId", (req, res) => {
     "no-store, no-cache, must-revalidate"
   );
 
-  res.setHeader(
-    "Pragma",
-    "no-cache"
-  );
+  res.setHeader("Pragma", "no-cache");
 
   res.send(job.outputBuffer);
 });
@@ -165,9 +149,6 @@ app.get("/download/:jobId", (req, res) => {
 ========================= */
 
 const conversionMap = {
-
-  /* OFFICE -> PDF */
-
   "word-to-pdf": {
     format: "pdf",
     extension: "pdf",
@@ -185,8 +166,6 @@ const conversionMap = {
     extension: "pdf",
     contentType: "application/pdf"
   },
-
-  /* PDF -> OFFICE */
 
   "pdf-to-word": {
     format: "docx",
@@ -218,7 +197,6 @@ app.post(
   "/convert",
   upload.single("file"),
   (req, res) => {
-
     if (!req.file) {
       return res.status(400).json({
         success: false,
@@ -237,7 +215,6 @@ app.post(
     ).trim();
 
     if (!jobId) {
-
       safeDelete(req.file.path);
 
       return res.status(400).json({
@@ -246,11 +223,9 @@ app.post(
       });
     }
 
-    const conversion =
-      conversionMap[tool];
+    const conversion = conversionMap[tool];
 
     if (!conversion) {
-
       safeDelete(req.file.path);
 
       return res.status(400).json({
@@ -267,36 +242,28 @@ app.post(
       "file"
     );
 
-    const safeName =
-      path.basename(originalName);
+    const safeName = path.basename(originalName);
 
     const inputPath = path.join(
       UPLOAD_DIR,
       jobId + "-" + safeName
     );
 
-    const jobOutputDir =
-      path.join(
-        OUTPUT_DIR,
-        jobId
-      );
-
-    fs.mkdirSync(
-      jobOutputDir,
-      {
-        recursive: true
-      }
+    const jobOutputDir = path.join(
+      OUTPUT_DIR,
+      jobId
     );
 
-    try {
+    fs.mkdirSync(jobOutputDir, {
+      recursive: true
+    });
 
+    try {
       fs.renameSync(
         req.file.path,
         inputPath
       );
-
     } catch (error) {
-
       safeDelete(req.file.path);
 
       return res.status(500).json({
@@ -323,28 +290,45 @@ app.post(
     });
 
     /* =========================
-       LIBREOFFICE CONVERSION
+       LIBREOFFICE ARGUMENTS
     ========================= */
 
-    const libreOfficeArgs =
-      tool === "pdf-to-word"
-        ? [
-            "--headless",
-            "--infilter=writer_pdf_import",
-            "--convert-to",
-            "docx:MS Word 2007 XML",
-            "--outdir",
-            jobOutputDir,
-            inputPath
-          ]
-        : [
-            "--headless",
-            "--convert-to",
-            conversion.format,
-            "--outdir",
-            jobOutputDir,
-            inputPath
-          ];
+    let libreOfficeArgs;
+
+    if (tool === "pdf-to-word") {
+      libreOfficeArgs = [
+        "--headless",
+        "--infilter=writer_pdf_import",
+        "--convert-to",
+        "docx:MS Word 2007 XML",
+        "--outdir",
+        jobOutputDir,
+        inputPath
+      ];
+    } else {
+      libreOfficeArgs = [
+        "--headless",
+        "--convert-to",
+        conversion.format,
+        "--outdir",
+        jobOutputDir,
+        inputPath
+      ];
+    }
+
+    console.log(
+      "Conversion tool:",
+      tool
+    );
+
+    console.log(
+      "LibreOffice command arguments:",
+      libreOfficeArgs
+    );
+
+    /* =========================
+       RUN LIBREOFFICE
+    ========================= */
 
     execFile(
       "libreoffice",
@@ -354,16 +338,6 @@ app.post(
         maxBuffer: 10 * 1024 * 1024
       },
       (error, stdout, stderr) => {
-
-        /* Remove input */
-
-        safeDelete(inputPath);
-
-        console.log(
-          "Conversion tool:",
-          tool
-        );
-
         console.log(
           "LibreOffice stdout:",
           stdout || ""
@@ -374,8 +348,9 @@ app.post(
           stderr || ""
         );
 
-        if (error) {
+        safeDelete(inputPath);
 
+        if (error) {
           console.error(
             "LibreOffice conversion failed:",
             error.message
@@ -383,130 +358,110 @@ app.post(
 
           jobs.set(jobId, {
             status: "error",
-            error:
-              getLibreOfficeError(
-                tool,
-                stderr,
-                error
-              )
+            error: getLibreOfficeError(
+              tool,
+              stderr,
+              error
+            )
           });
 
-          cleanupDirectory(
-            jobOutputDir
-          );
+          cleanupDirectory(jobOutputDir);
 
           return;
         }
 
-        /* Find output */
+        /* =========================
+           FIND OUTPUT
+        ========================= */
 
         let files;
 
         try {
-
-          files =
-            fs.readdirSync(
-              jobOutputDir
-            );
-
+          files = fs.readdirSync(
+            jobOutputDir
+          );
         } catch (readError) {
-
           jobs.set(jobId, {
             status: "error",
             error:
               "Unable to read conversion output."
           });
 
-          cleanupDirectory(
-            jobOutputDir
-          );
+          cleanupDirectory(jobOutputDir);
 
           return;
         }
 
         if (!files.length) {
-
           jobs.set(jobId, {
             status: "error",
             error:
               "Conversion output was not created."
           });
 
-          cleanupDirectory(
-            jobOutputDir
-          );
+          cleanupDirectory(jobOutputDir);
 
           return;
         }
 
-        /* Prefer expected extension */
-
-        let outputName =
-          files.find(
-            file =>
-              path
-                .extname(file)
-                .toLowerCase() ===
-              "." +
-                conversion.extension
-          );
-
-        /* Fallback */
+        let outputName = files.find(
+          file =>
+            path.extname(file).toLowerCase() ===
+            "." + conversion.extension
+        );
 
         if (!outputName) {
           outputName = files[0];
         }
 
-        const outputFile =
-          path.join(
-            jobOutputDir,
-            outputName
-          );
+        const outputFile = path.join(
+          jobOutputDir,
+          outputName
+        );
+
+        /* =========================
+           READ OUTPUT
+        ========================= */
+
+        let outputBuffer;
 
         try {
-
-          const outputBuffer =
-            fs.readFileSync(
-              outputFile
-            );
-
-          jobs.set(jobId, {
-            status: "finished",
-            outputBuffer:
-              outputBuffer,
-            filename:
-              outputFilename,
-            contentType:
-              conversion.contentType
-          });
-
-          console.log(
-            "Conversion finished:",
-            jobId
+          outputBuffer = fs.readFileSync(
+            outputFile
           );
-
         } catch (readError) {
-
           jobs.set(jobId, {
             status: "error",
             error:
               "Unable to read conversion output."
           });
 
-          cleanupDirectory(
-            jobOutputDir
-          );
+          cleanupDirectory(jobOutputDir);
 
           return;
         }
 
-        /* Remove temporary output */
+        jobs.set(jobId, {
+          status: "finished",
+          outputBuffer: outputBuffer,
+          filename: outputFilename,
+          contentType: conversion.contentType
+        });
 
-        cleanupDirectory(
-          jobOutputDir
+        console.log(
+          "Conversion finished:",
+          jobId
         );
 
-        /* Automatically remove job after 10 minutes */
+        /* =========================
+           CLEAN OUTPUT DIRECTORY
+        ========================= */
+
+        cleanupDirectory(jobOutputDir);
+
+        /* =========================
+           REMOVE JOB AFTER 10 MIN
+        ========================= */
 
         setTimeout(() => {
           jobs.delete(jobId);
@@ -536,39 +491,32 @@ function safeDelete(filePath) {
     ) {
       fs.unlinkSync(filePath);
     }
-  } catch {}
+  } catch (error) {}
 }
 
 function cleanupDirectory(dir) {
-
   try {
-
-    if (
-      fs.existsSync(dir)
-    ) {
-
-      const files =
-        fs.readdirSync(dir);
-
-      for (const file of files) {
-
-        const fullPath =
-          path.join(
-            dir,
-            file
-          );
-
-        try {
-          fs.unlinkSync(fullPath);
-        } catch {}
-      }
-
-      try {
-        fs.rmdirSync(dir);
-      } catch {}
+    if (!fs.existsSync(dir)) {
+      return;
     }
 
-  } catch {}
+    const files = fs.readdirSync(dir);
+
+    for (const file of files) {
+      const fullPath = path.join(
+        dir,
+        file
+      );
+
+      try {
+        fs.unlinkSync(fullPath);
+      } catch (error) {}
+    }
+
+    try {
+      fs.rmdirSync(dir);
+    } catch (error) {}
+  } catch (error) {}
 }
 
 function getLibreOfficeError(
@@ -576,7 +524,6 @@ function getLibreOfficeError(
   stderr,
   error
 ) {
-
   if (
     stderr &&
     stderr.trim()
@@ -609,7 +556,6 @@ app.listen(
   PORT,
   "0.0.0.0",
   () => {
-
     console.log(
       "================================="
     );
@@ -619,8 +565,7 @@ app.listen(
     );
 
     console.log(
-      "Running on port " +
-      PORT
+      "Running on port " + PORT
     );
 
     console.log(
