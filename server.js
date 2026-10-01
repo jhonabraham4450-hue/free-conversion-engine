@@ -6,10 +6,20 @@ const { execFile } = require("child_process");
 
 const app = express();
 
+/* =========================
+   CORS
+========================= */
+
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Content-Type");
+  res.header(
+    "Access-Control-Allow-Methods",
+    "GET,POST,OPTIONS"
+  );
+  res.header(
+    "Access-Control-Allow-Headers",
+    "Content-Type"
+  );
 
   if (req.method === "OPTIONS") {
     return res.sendStatus(204);
@@ -18,11 +28,38 @@ app.use((req, res, next) => {
   next();
 });
 
-const upload = multer({
-  dest: "/tmp/uploads"
+/* =========================
+   DIRECTORIES
+========================= */
+
+const UPLOAD_DIR = "/tmp/uploads";
+const OUTPUT_DIR = "/tmp/output";
+
+fs.mkdirSync(UPLOAD_DIR, {
+  recursive: true
 });
 
+fs.mkdirSync(OUTPUT_DIR, {
+  recursive: true
+});
+
+/* =========================
+   UPLOAD
+========================= */
+
+const upload = multer({
+  dest: UPLOAD_DIR
+});
+
+/* =========================
+   JOB STORAGE
+========================= */
+
 const jobs = new Map();
+
+/* =========================
+   HOME / HEALTH CHECK
+========================= */
 
 app.get("/", (req, res) => {
   res.json({
@@ -32,8 +69,14 @@ app.get("/", (req, res) => {
   });
 });
 
+/* =========================
+   STATUS
+========================= */
+
 app.get("/status/:jobId", (req, res) => {
-  const job = jobs.get(req.params.jobId);
+  const jobId = req.params.jobId;
+
+  const job = jobs.get(jobId);
 
   if (!job) {
     return res.status(404).json({
@@ -45,7 +88,10 @@ app.get("/status/:jobId", (req, res) => {
   if (job.status === "finished") {
     return res.json({
       status: "finished",
-      url: getBaseUrl(req) + "/download/" + req.params.jobId,
+      url:
+        getBaseUrl(req) +
+        "/download/" +
+        encodeURIComponent(jobId),
       filename: job.filename
     });
   }
@@ -53,7 +99,9 @@ app.get("/status/:jobId", (req, res) => {
   if (job.status === "error") {
     return res.json({
       status: "error",
-      error: job.error || "Conversion failed."
+      error:
+        job.error ||
+        "Conversion failed."
     });
   }
 
@@ -62,21 +110,36 @@ app.get("/status/:jobId", (req, res) => {
   });
 });
 
-app.get("/download/:jobId", (req, res) => {
-  const job = jobs.get(req.params.jobId);
+/* =========================
+   DOWNLOAD
+========================= */
 
-  if (!job || job.status !== "finished" || !job.outputBuffer) {
-    return res.status(404).send("Output file no longer exists.");
+app.get("/download/:jobId", (req, res) => {
+  const jobId = req.params.jobId;
+
+  const job = jobs.get(jobId);
+
+  if (
+    !job ||
+    job.status !== "finished" ||
+    !job.outputBuffer
+  ) {
+    return res.status(404).send(
+      "Output file no longer exists."
+    );
   }
 
   res.setHeader(
     "Content-Type",
-    job.contentType || "application/pdf"
+    job.contentType ||
+      "application/octet-stream"
   );
 
   res.setHeader(
     "Content-Disposition",
-    'attachment; filename="' + job.filename + '"'
+    'attachment; filename="' +
+      job.filename.replace(/"/g, "") +
+      '"'
   );
 
   res.setHeader(
@@ -89,184 +152,498 @@ app.get("/download/:jobId", (req, res) => {
     "no-store, no-cache, must-revalidate"
   );
 
-  res.setHeader("Pragma", "no-cache");
+  res.setHeader(
+    "Pragma",
+    "no-cache"
+  );
 
   res.send(job.outputBuffer);
 });
 
-app.post("/convert", upload.single("file"), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({
-      success: false,
-      error: "No file uploaded."
-    });
+/* =========================
+   CONVERSION MAP
+========================= */
+
+const conversionMap = {
+
+  /*
+   * OFFICE -> PDF
+   */
+
+  "word-to-pdf": {
+    format: "pdf",
+    extension: "pdf",
+    contentType: "application/pdf"
+  },
+
+  "powerpoint-to-pdf": {
+    format: "pdf",
+    extension: "pdf",
+    contentType: "application/pdf"
+  },
+
+  "excel-to-pdf": {
+    format: "pdf",
+    extension: "pdf",
+    contentType: "application/pdf"
+  },
+
+  /*
+   * PDF -> OFFICE
+   */
+
+  "pdf-to-word": {
+    format: "docx",
+    extension: "docx",
+    contentType:
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  },
+
+  "pdf-to-powerpoint": {
+    format: "pptx",
+    extension: "pptx",
+    contentType:
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+  },
+
+  "pdf-to-excel": {
+    format: "xlsx",
+    extension: "xlsx",
+    contentType:
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
   }
+};
 
-  const tool = String(req.body.tool || "")
-    .trim()
-    .toLowerCase();
+/* =========================
+   CONVERT
+========================= */
 
-  const jobId = String(req.body.jobId || "");
+app.post(
+  "/convert",
+  upload.single("file"),
+  (req, res) => {
 
-  if (!jobId) {
-    fs.unlink(req.file.path, () => {});
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: "No file uploaded."
+      });
+    }
 
-    return res.status(400).json({
-      success: false,
-      error: "Missing job id."
-    });
-  }
+    const tool = String(
+      req.body.tool || ""
+    )
+      .trim()
+      .toLowerCase();
 
-  const allowedTools = {
-    "word-to-pdf": "pdf",
-    "powerpoint-to-pdf": "pdf",
-    "excel-to-pdf": "pdf"
-  };
+    const jobId = String(
+      req.body.jobId || ""
+    ).trim();
 
-  const outputFormat = allowedTools[tool];
+    if (!jobId) {
 
-  if (!outputFormat) {
-    fs.unlink(req.file.path, () => {});
+      safeDelete(req.file.path);
 
-    return res.status(400).json({
-      success: false,
-      error: "Unsupported conversion tool: " + tool
-    });
-  }
+      return res.status(400).json({
+        success: false,
+        error: "Missing job id."
+      });
+    }
 
-  const originalName = String(
-    req.body.filename ||
-    req.file.originalname ||
-    "file"
-  );
+    const conversion =
+      conversionMap[tool];
 
-  const safeName = path.basename(originalName);
+    /*
+     * Only the 6 server-side tools
+     * should reach this endpoint.
+     */
 
-  const inputPath = path.join(
-    "/tmp/uploads",
-    jobId + "-" + safeName
-  );
+    if (!conversion) {
 
-  const outputDir = path.join(
-    "/tmp/output",
-    jobId
-  );
+      safeDelete(req.file.path);
 
-  fs.mkdirSync(outputDir, {
-    recursive: true
-  });
+      return res.status(400).json({
+        success: false,
+        error:
+          "Unsupported conversion tool: " +
+          tool
+      });
+    }
 
-  fs.renameSync(req.file.path, inputPath);
+    const originalName = String(
+      req.body.filename ||
+      req.file.originalname ||
+      "file"
+    );
 
-  const outputFilename =
-    path.parse(safeName).name + "." + outputFormat;
+    const safeName =
+      path.basename(originalName);
 
-  jobs.set(jobId, {
-    status: "processing",
-    filename: outputFilename
-  });
+    const inputPath = path.join(
+      UPLOAD_DIR,
+      jobId + "-" + safeName
+    );
 
-  res.json({
-    success: true,
-    jobId: jobId,
-    status: "processing"
-  });
-
-  execFile(
-    "libreoffice",
-    [
-      "--headless",
-      "--convert-to",
-      outputFormat,
-      "--outdir",
-      outputDir,
-      inputPath
-    ],
-    (error) => {
-      try {
-        fs.unlinkSync(inputPath);
-      } catch {}
-
-      if (error) {
-        jobs.set(jobId, {
-          status: "error",
-          error: "LibreOffice conversion failed."
-        });
-
-        return;
-      }
-
-      let files = [];
-
-      try {
-        files = fs.readdirSync(outputDir);
-      } catch {
-        jobs.set(jobId, {
-          status: "error",
-          error: "Unable to read conversion output."
-        });
-
-        return;
-      }
-
-      if (!files.length) {
-        jobs.set(jobId, {
-          status: "error",
-          error: "Conversion output was not created."
-        });
-
-        return;
-      }
-
-      const outputFile = path.join(
-        outputDir,
-        files[0]
+    const jobOutputDir =
+      path.join(
+        OUTPUT_DIR,
+        jobId
       );
 
-      try {
-        const outputBuffer = fs.readFileSync(outputFile);
+    fs.mkdirSync(
+      jobOutputDir,
+      {
+        recursive: true
+      }
+    );
 
-        jobs.set(jobId, {
-          status: "finished",
-          outputBuffer: outputBuffer,
-          filename: outputFilename,
-          contentType: "application/pdf"
-        });
+    try {
+
+      fs.renameSync(
+        req.file.path,
+        inputPath
+      );
+
+    } catch (error) {
+
+      safeDelete(req.file.path);
+
+      return res.status(500).json({
+        success: false,
+        error:
+          "Unable to prepare uploaded file."
+      });
+    }
+
+    const outputFilename =
+      path.parse(safeName).name +
+      "." +
+      conversion.extension;
+
+    jobs.set(jobId, {
+      status: "processing",
+      filename: outputFilename
+    });
+
+    /*
+     * Respond immediately.
+     */
+
+    res.json({
+      success: true,
+      jobId: jobId,
+      status: "processing"
+    });
+
+    /*
+     * LibreOffice conversion
+     */
+
+    execFile(
+      "libreoffice",
+      [
+        "--headless",
+        "--convert-to",
+        conversion.format,
+        "--outdir",
+        jobOutputDir,
+        inputPath
+      ],
+      {
+        timeout: 180000,
+        maxBuffer: 10 * 1024 * 1024
+      },
+      (error, stdout, stderr) => {
+
+        /*
+         * Remove input
+         */
+
+        safeDelete(inputPath);
+
+        console.log(
+          "Conversion tool:",
+          tool
+        );
+
+        console.log(
+          "LibreOffice stdout:",
+          stdout || ""
+        );
+
+        console.log(
+          "LibreOffice stderr:",
+          stderr || ""
+        );
+
+        if (error) {
+
+          console.error(
+            "LibreOffice conversion failed:",
+            error.message
+          );
+
+          jobs.set(jobId, {
+            status: "error",
+            error:
+              getLibreOfficeError(
+                tool,
+                stderr,
+                error
+              )
+          });
+
+          cleanupDirectory(
+            jobOutputDir
+          );
+
+          return;
+        }
+
+        /*
+         * Find output
+         */
+
+        let files;
 
         try {
-          fs.unlinkSync(outputFile);
-        } catch {}
+
+          files =
+            fs.readdirSync(
+              jobOutputDir
+            );
+
+        } catch (readError) {
+
+          jobs.set(jobId, {
+            status: "error",
+            error:
+              "Unable to read conversion output."
+          });
+
+          cleanupDirectory(
+            jobOutputDir
+          );
+
+          return;
+        }
+
+        if (!files.length) {
+
+          jobs.set(jobId, {
+            status: "error",
+            error:
+              "Conversion output was not created."
+          });
+
+          cleanupDirectory(
+            jobOutputDir
+          );
+
+          return;
+        }
+
+        /*
+         * Prefer expected extension.
+         */
+
+        let outputName =
+          files.find(
+            file =>
+              path
+                .extname(file)
+                .toLowerCase() ===
+              "." +
+                conversion.extension
+          );
+
+        /*
+         * Fallback to first generated file.
+         */
+
+        if (!outputName) {
+          outputName = files[0];
+        }
+
+        const outputFile =
+          path.join(
+            jobOutputDir,
+            outputName
+          );
 
         try {
-          fs.rmdirSync(outputDir);
-        } catch {}
+
+          const outputBuffer =
+            fs.readFileSync(
+              outputFile
+            );
+
+          jobs.set(jobId, {
+            status: "finished",
+            outputBuffer:
+              outputBuffer,
+            filename:
+              outputFilename,
+            contentType:
+              conversion.contentType
+          });
+
+          console.log(
+            "Conversion finished:",
+            jobId
+          );
+
+        } catch (readError) {
+
+          jobs.set(jobId, {
+            status: "error",
+            error:
+              "Unable to read conversion output."
+          });
+        }
+
+        /*
+         * Remove temporary output.
+         */
+
+        cleanupDirectory(
+          jobOutputDir
+        );
+
+        /*
+         * Automatically remove job
+         * after 10 minutes.
+         */
 
         setTimeout(() => {
           jobs.delete(jobId);
         }, 10 * 60 * 1000);
-
-      } catch {
-        jobs.set(jobId, {
-          status: "error",
-          error: "Unable to read conversion output."
-        });
       }
-    }
-  );
-});
+    );
+  }
+);
+
+/* =========================
+   HELPERS
+========================= */
 
 function getBaseUrl(req) {
-  return req.protocol + "://" + req.get("host");
+  return (
+    req.protocol +
+    "://" +
+    req.get("host")
+  );
 }
 
-const PORT = process.env.PORT || 10000;
+function safeDelete(filePath) {
+  try {
+    if (
+      filePath &&
+      fs.existsSync(filePath)
+    ) {
+      fs.unlinkSync(filePath);
+    }
+  } catch {}
+}
+
+function cleanupDirectory(dir) {
+
+  try {
+
+    if (
+      fs.existsSync(dir)
+    ) {
+
+      const files =
+        fs.readdirSync(dir);
+
+      for (const file of files) {
+
+        const fullPath =
+          path.join(
+            dir,
+            file
+          );
+
+        try {
+          fs.unlinkSync(fullPath);
+        } catch {}
+      }
+
+      try {
+        fs.rmdirSync(dir);
+      } catch {}
+    }
+
+  } catch {}
+}
+
+function getLibreOfficeError(
+  tool,
+  stderr,
+  error
+) {
+
+  if (
+    stderr &&
+    stderr.trim()
+  ) {
+    return (
+      "LibreOffice conversion failed: " +
+      stderr.trim()
+    );
+  }
+
+  return (
+    "Conversion failed for " +
+    tool +
+    ". " +
+    (
+      error?.message ||
+      "Unknown conversion error."
+    )
+  );
+}
+
+/* =========================
+   SERVER
+========================= */
+
+const PORT =
+  process.env.PORT || 10000;
 
 app.listen(
   PORT,
   "0.0.0.0",
   () => {
+
     console.log(
-      "Conversion engine running on port " + PORT
+      "================================="
+    );
+
+    console.log(
+      "iLovePDF4 Conversion Engine"
+    );
+
+    console.log(
+      "Running on port " +
+        PORT
+    );
+
+    console.log(
+      "Supported server tools:"
+    );
+
+    Object.keys(
+      conversionMap
+    ).forEach(tool => {
+      console.log(
+        " - " + tool
+      );
+    });
+
+    console.log(
+      "================================="
     );
   }
 );
