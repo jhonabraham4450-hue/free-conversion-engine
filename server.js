@@ -30,9 +30,11 @@ app.use((req, res, next) => {
 
 const UPLOAD_DIR = "/tmp/uploads";
 const OUTPUT_DIR = "/tmp/output";
+const PROFILE_DIR = "/tmp/lo-profiles";
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+fs.mkdirSync(PROFILE_DIR, { recursive: true });
 
 /* =========================
    UPLOAD
@@ -47,6 +49,13 @@ const upload = multer({
 ========================= */
 
 const jobs = new Map();
+
+/* =========================
+   PUBLIC BASE URL
+========================= */
+
+const PUBLIC_BASE_URL =
+  "https://free-conversion-engine.onrender.com";
 
 /* =========================
    HOME / HEALTH
@@ -79,7 +88,7 @@ app.get("/status/:jobId", (req, res) => {
     return res.json({
       status: "finished",
       url:
-        getBaseUrl(req) +
+        PUBLIC_BASE_URL +
         "/download/" +
         encodeURIComponent(jobId),
       filename: job.filename
@@ -254,7 +263,16 @@ app.post(
       jobId
     );
 
+    const jobProfileDir = path.join(
+      PROFILE_DIR,
+      jobId
+    );
+
     fs.mkdirSync(jobOutputDir, {
+      recursive: true
+    });
+
+    fs.mkdirSync(jobProfileDir, {
       recursive: true
     });
 
@@ -293,28 +311,127 @@ app.post(
        LIBREOFFICE ARGUMENTS
     ========================= */
 
-    let libreOfficeArgs;
+    let libreOfficeArgs = [
+      "--headless",
+      "--nologo",
+      "--nodefault",
+      "--nofirststartwizard",
+      "--nolockcheck",
 
-    if (tool === "pdf-to-word") {
-      libreOfficeArgs = [
-        "--headless",
-        "--infilter=writer_pdf_import",
-        "--convert-to",
-        "docx:MS Word 2007 XML",
+      "-env:UserInstallation=file://" +
+        jobProfileDir,
+
+      "--convert-to"
+    ];
+
+    /* =========================
+       WORD TO PDF
+    ========================= */
+
+    if (tool === "word-to-pdf") {
+      libreOfficeArgs.push(
+        "pdf:writer_pdf_Export"
+      );
+
+      libreOfficeArgs.push(
         "--outdir",
         jobOutputDir,
         inputPath
-      ];
-    } else {
-      libreOfficeArgs = [
-        "--headless",
-        "--convert-to",
-        conversion.format,
-        "--outdir",
-        jobOutputDir,
-        inputPath
-      ];
+      );
     }
+
+    /* =========================
+       POWERPOINT TO PDF
+    ========================= */
+
+    else if (
+      tool === "powerpoint-to-pdf"
+    ) {
+      libreOfficeArgs.push(
+        "pdf:impress_pdf_Export"
+      );
+
+      libreOfficeArgs.push(
+        "--outdir",
+        jobOutputDir,
+        inputPath
+      );
+    }
+
+    /* =========================
+       EXCEL TO PDF
+    ========================= */
+
+    else if (
+      tool === "excel-to-pdf"
+    ) {
+      libreOfficeArgs.push(
+        "pdf:calc_pdf_Export"
+      );
+
+      libreOfficeArgs.push(
+        "--outdir",
+        jobOutputDir,
+        inputPath
+      );
+    }
+
+    /* =========================
+       PDF TO WORD
+    ========================= */
+
+    else if (tool === "pdf-to-word") {
+      libreOfficeArgs.push(
+        "docx:MS Word 2007 XML"
+      );
+
+      libreOfficeArgs.push(
+        "--infilter=writer_pdf_import",
+        "--outdir",
+        jobOutputDir,
+        inputPath
+      );
+    }
+
+    /* =========================
+       PDF TO POWERPOINT
+    ========================= */
+
+    else if (
+      tool === "pdf-to-powerpoint"
+    ) {
+      libreOfficeArgs.push(
+        "pptx:Impress MS PowerPoint 2007 XML"
+      );
+
+      libreOfficeArgs.push(
+        "--infilter=draw_pdf_import",
+        "--outdir",
+        jobOutputDir,
+        inputPath
+      );
+    }
+
+    /* =========================
+       PDF TO EXCEL
+    ========================= */
+
+    else if (tool === "pdf-to-excel") {
+      libreOfficeArgs.push(
+        "xlsx:Calc MS Excel 2007 XML"
+      );
+
+      libreOfficeArgs.push(
+        "--infilter=draw_pdf_import",
+        "--outdir",
+        jobOutputDir,
+        inputPath
+      );
+    }
+
+    console.log(
+      "================================="
+    );
 
     console.log(
       "Conversion tool:",
@@ -322,8 +439,22 @@ app.post(
     );
 
     console.log(
-      "LibreOffice command arguments:",
+      "Input:",
+      inputPath
+    );
+
+    console.log(
+      "Output directory:",
+      jobOutputDir
+    );
+
+    console.log(
+      "LibreOffice arguments:",
       libreOfficeArgs
+    );
+
+    console.log(
+      "================================="
     );
 
     /* =========================
@@ -335,7 +466,7 @@ app.post(
       libreOfficeArgs,
       {
         timeout: 180000,
-        maxBuffer: 10 * 1024 * 1024
+        maxBuffer: 20 * 1024 * 1024
       },
       (error, stdout, stderr) => {
         console.log(
@@ -366,6 +497,7 @@ app.post(
           });
 
           cleanupDirectory(jobOutputDir);
+          cleanupDirectory(jobProfileDir);
 
           return;
         }
@@ -388,6 +520,7 @@ app.post(
           });
 
           cleanupDirectory(jobOutputDir);
+          cleanupDirectory(jobProfileDir);
 
           return;
         }
@@ -400,6 +533,7 @@ app.post(
           });
 
           cleanupDirectory(jobOutputDir);
+          cleanupDirectory(jobProfileDir);
 
           return;
         }
@@ -437,6 +571,7 @@ app.post(
           });
 
           cleanupDirectory(jobOutputDir);
+          cleanupDirectory(jobProfileDir);
 
           return;
         }
@@ -453,11 +588,23 @@ app.post(
           jobId
         );
 
+        console.log(
+          "Output file:",
+          outputFile
+        );
+
+        console.log(
+          "Output size:",
+          outputBuffer.length,
+          "bytes"
+        );
+
         /* =========================
            CLEAN OUTPUT DIRECTORY
         ========================= */
 
         cleanupDirectory(jobOutputDir);
+        cleanupDirectory(jobProfileDir);
 
         /* =========================
            REMOVE JOB AFTER 10 MIN
@@ -474,14 +621,6 @@ app.post(
 /* =========================
    HELPERS
 ========================= */
-
-function getBaseUrl(req) {
-  return (
-    req.protocol +
-    "://" +
-    req.get("host")
-  );
-}
 
 function safeDelete(filePath) {
   try {
@@ -509,7 +648,10 @@ function cleanupDirectory(dir) {
       );
 
       try {
-        fs.unlinkSync(fullPath);
+        fs.rmSync(fullPath, {
+          recursive: true,
+          force: true
+        });
       } catch (error) {}
     }
 
@@ -566,6 +708,11 @@ app.listen(
 
     console.log(
       "Running on port " + PORT
+    );
+
+    console.log(
+      "Public URL:",
+      PUBLIC_BASE_URL
     );
 
     console.log(
