@@ -166,9 +166,7 @@ app.get("/download/:jobId", (req, res) => {
 
 const conversionMap = {
 
-  /*
-   * OFFICE -> PDF
-   */
+  /* OFFICE -> PDF */
 
   "word-to-pdf": {
     format: "pdf",
@@ -188,9 +186,7 @@ const conversionMap = {
     contentType: "application/pdf"
   },
 
-  /*
-   * PDF -> OFFICE
-   */
+  /* PDF -> OFFICE */
 
   "pdf-to-word": {
     format: "docx",
@@ -252,11 +248,6 @@ app.post(
 
     const conversion =
       conversionMap[tool];
-
-    /*
-     * Only the 6 server-side tools
-     * should reach this endpoint.
-     */
 
     if (!conversion) {
 
@@ -325,56 +316,46 @@ app.post(
       filename: outputFilename
     });
 
-    /*
-     * Respond immediately.
-     */
-
     res.json({
       success: true,
       jobId: jobId,
       status: "processing"
     });
 
-    /*
-     * LibreOffice conversion
-     */
+    /* =========================
+       LIBREOFFICE CONVERSION
+    ========================= */
 
     const libreOfficeArgs =
-  tool === "pdf-to-word"
-    ? [
-        "--headless",
-        "--infilter=writer_pdf_import",
-        "--convert-to",
-        "docx:MS Word 2007 XML",
-        "--outdir",
-        jobOutputDir,
-        inputPath
-      ]
-    : [
-        "--headless",
-        "--convert-to",
-        conversion.format,
-        "--outdir",
-        jobOutputDir,
-        inputPath
-      ];
+      tool === "pdf-to-word"
+        ? [
+            "--headless",
+            "--infilter=writer_pdf_import",
+            "--convert-to",
+            "docx:MS Word 2007 XML",
+            "--outdir",
+            jobOutputDir,
+            inputPath
+          ]
+        : [
+            "--headless",
+            "--convert-to",
+            conversion.format,
+            "--outdir",
+            jobOutputDir,
+            inputPath
+          ];
 
-execFile(
-  "libreoffice",
-  libreOfficeArgs,
-  {
-    timeout: 180000,
-    maxBuffer: 10 * 1024 * 1024
-  },
-  (error, stdout, stderr) => {
+    execFile(
+      "libreoffice",
+      libreOfficeArgs,
+      {
         timeout: 180000,
         maxBuffer: 10 * 1024 * 1024
       },
       (error, stdout, stderr) => {
 
-        /*
-         * Remove input
-         */
+        /* Remove input */
 
         safeDelete(inputPath);
 
@@ -417,9 +398,7 @@ execFile(
           return;
         }
 
-        /*
-         * Find output
-         */
+        /* Find output */
 
         let files;
 
@@ -460,9 +439,7 @@ execFile(
           return;
         }
 
-        /*
-         * Prefer expected extension.
-         */
+        /* Prefer expected extension */
 
         let outputName =
           files.find(
@@ -474,9 +451,7 @@ execFile(
                 conversion.extension
           );
 
-        /*
-         * Fallback to first generated file.
-         */
+        /* Fallback */
 
         if (!outputName) {
           outputName = files[0];
@@ -517,20 +492,21 @@ execFile(
             error:
               "Unable to read conversion output."
           });
+
+          cleanupDirectory(
+            jobOutputDir
+          );
+
+          return;
         }
 
-        /*
-         * Remove temporary output.
-         */
+        /* Remove temporary output */
 
         cleanupDirectory(
           jobOutputDir
         );
 
-        /*
-         * Automatically remove job
-         * after 10 minutes.
-         */
+        /* Automatically remove job after 10 minutes */
 
         setTimeout(() => {
           jobs.delete(jobId);
@@ -644,7 +620,7 @@ app.listen(
 
     console.log(
       "Running on port " +
-        PORT
+      PORT
     );
 
     console.log(
