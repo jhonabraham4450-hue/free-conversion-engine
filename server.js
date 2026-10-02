@@ -4,9 +4,19 @@ const fs = require("fs");
 const path = require("path");
 const { execFile } = require("child_process");
 
-const { createCanvas } = require("@napi-rs/canvas");
-const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
+const {
+  createCanvas,
+  DOMMatrix,
+  Path2D,
+  ImageData
+} = require("@napi-rs/canvas");
 
+globalThis.DOMMatrix = DOMMatrix;
+globalThis.Path2D = Path2D;
+globalThis.ImageData = ImageData;
+
+const pdfjsLib =
+  require("pdfjs-dist/legacy/build/pdf.js");
 const {
   Document,
   Packer,
