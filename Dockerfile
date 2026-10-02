@@ -1,7 +1,9 @@
 FROM node:20-bookworm
 
 RUN apt-get update \
-    && apt-get install -y libreoffice \
+    && apt-get install -y \
+       libreoffice \
+       poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
