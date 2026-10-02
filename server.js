@@ -3,83 +3,69 @@ const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
 const { execFile } = require("child_process");
-const { promisify } = require("util");
-const { Document, Packer, Paragraph, TextRun } = require("docx");
-
-const execFileAsync = promisify(execFile);
 
 const app = express();
 
-const PORT = process.env.PORT || 10000;
-const HOST = "0.0.0.0";
+app.use(express.json({ limit: "10mb" }));
+
+/* =========================
+   CORS
+========================= */
+
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header(
+    "Access-Control-Allow-Methods",
+    "GET,POST,OPTIONS"
+  );
+  res.header(
+    "Access-Control-Allow-Headers",
+    "Content-Type"
+  );
+
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(204);
+  }
+
+  next();
+});
+
+/* =========================
+   DIRECTORIES
+========================= */
+
+const UPLOAD_DIR = "/tmp/uploads";
+const OUTPUT_DIR = "/tmp/output";
+const PROFILE_DIR = "/tmp/lo-profiles";
+
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+fs.mkdirSync(PROFILE_DIR, { recursive: true });
+
+/* =========================
+   UPLOAD
+========================= */
+
+const upload = multer({
+  dest: UPLOAD_DIR
+});
+
+/* =========================
+   JOB STORAGE
+========================= */
+
+const jobs = new Map();
+
+/* =========================
+   PUBLIC URL
+========================= */
 
 const PUBLIC_BASE_URL =
   "https://free-conversion-engine.onrender.com";
 
-const UPLOAD_DIR = "/tmp/uploads";
-const OUTPUT_DIR = "/tmp/output";
-const LO_PROFILE_DIR = "/tmp/lo-profiles";
-
-fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-fs.mkdirSync(OUTPUT_DIR, { recursive: true });
-fs.mkdirSync(LO_PROFILE_DIR, { recursive: true });
-
-const upload = multer({
-  dest: UPLOAD_DIR,
-  limits: {
-    fileSize: 50 * 1024 * 1024
-  }
-});
-
-const jobs = new Map();
-
-/* =========================================================
-   BASIC HELPERS
-========================================================= */
-
-function safeName(name) {
-  return String(name || "file")
-    .replace(/[^a-zA-Z0-9._-]/g, "_")
-    .slice(0, 180);
-}
-
-function json(data, status = 200) {
-  return new Response(
-    JSON.stringify(data),
-    {
-      status,
-      headers: {
-        "Content-Type": "application/json",
-        "Cache-Control": "no-store"
-      }
-    }
-  );
-}
-
-function extensionForTool(tool) {
-  const map = {
-    "word-to-pdf": "pdf",
-    "powerpoint-to-pdf": "pdf",
-    "excel-to-pdf": "pdf",
-    "pdf-to-word": "docx",
-    "pdf-to-powerpoint": "pptx",
-    "pdf-to-excel": "xlsx"
-  };
-
-  return map[tool] || "bin";
-}
-
-function cleanupFile(filePath) {
-  try {
-    if (filePath && fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
-  } catch (_) {}
-}
-
-/* =========================================================
+/* =========================
    HEALTH
-========================================================= */
+========================= */
 
 app.get("/", (req, res) => {
   res.json({
@@ -89,9 +75,9 @@ app.get("/", (req, res) => {
   });
 });
 
-/* =========================================================
+/* =========================
    STATUS
-========================================================= */
+========================= */
 
 app.get("/status/:jobId", (req, res) => {
   const jobId = req.params.jobId;
@@ -100,941 +86,856 @@ app.get("/status/:jobId", (req, res) => {
   if (!job) {
     return res.status(404).json({
       status: "error",
-      error: "Job not found.",
-      jobId
+      error: "Job not found."
+    });
+  }
+
+  if (job.status === "finished") {
+    return res.json({
+      status: "finished",
+      url:
+        PUBLIC_BASE_URL +
+        "/download/" +
+        encodeURIComponent(jobId),
+      filename: job.filename
+    });
+  }
+
+  if (job.status === "error") {
+    return res.json({
+      status: "error",
+      error:
+        job.error ||
+        "Conversion failed."
     });
   }
 
   return res.json({
-    status: job.status,
-    jobId,
-    filename: job.filename || null,
-    contentType: job.contentType || null,
-    url:
-      job.status === "finished"
-        ? `${PUBLIC_BASE_URL}/download/${encodeURIComponent(jobId)}`
-        : null,
-    error: job.error || null
+    status: "processing"
   });
 });
 
-/* =========================================================
+/* =========================
    DOWNLOAD
-========================================================= */
+========================= */
 
 app.get("/download/:jobId", (req, res) => {
   const jobId = req.params.jobId;
   const job = jobs.get(jobId);
 
-  if (!job) {
-    return res.status(404).send("Job not found.");
+  if (
+    !job ||
+    job.status !== "finished" ||
+    !job.outputBuffer
+  ) {
+    return res.status(404).send(
+      "Output file no longer exists."
+    );
   }
 
-  if (job.status !== "finished") {
-    return res.status(409).send("Conversion is not finished.");
-  }
-
-  if (!job.outputPath || !fs.existsSync(job.outputPath)) {
-    return res.status(404).send("Output file not found.");
-  }
-
-  res.download(
-    job.outputPath,
-    job.outputName || "converted-file"
+  res.setHeader(
+    "Content-Type",
+    job.contentType ||
+      "application/octet-stream"
   );
+
+  res.setHeader(
+    "Content-Disposition",
+    'attachment; filename="' +
+      job.filename.replace(/"/g, "") +
+      '"'
+  );
+
+  res.setHeader(
+    "Content-Length",
+    job.outputBuffer.length
+  );
+
+  res.setHeader(
+    "Cache-Control",
+    "no-store, no-cache, must-revalidate"
+  );
+
+  res.setHeader(
+    "Pragma",
+    "no-cache"
+  );
+
+  res.send(job.outputBuffer);
 });
 
-/* =========================================================
+/* =========================
+   CONVERSION MAP
+========================= */
+
+const conversionMap = {
+  "word-to-pdf": {
+    format: "pdf",
+    extension: "pdf",
+    contentType: "application/pdf"
+  },
+
+  "powerpoint-to-pdf": {
+    format: "pdf",
+    extension: "pdf",
+    contentType: "application/pdf"
+  },
+
+  "excel-to-pdf": {
+    format: "pdf",
+    extension: "pdf",
+    contentType: "application/pdf"
+  },
+
+  "pdf-to-word": {
+    format: "docx",
+    extension: "docx",
+    contentType:
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  },
+
+  "pdf-to-powerpoint": {
+    format: "pptx",
+    extension: "pptx",
+    contentType:
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+  },
+
+  "pdf-to-excel": {
+    format: "xlsx",
+    extension: "xlsx",
+    contentType:
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  }
+};
+
+/* =========================
    CONVERT
-========================================================= */
+========================= */
 
-app.post("/convert", upload.single("file"), async (req, res) => {
-  let inputPath = null;
+app.post(
+  "/convert",
+  upload.single("file"),
+  (req, res) => {
 
-  try {
-    const file = req.file;
-
-    if (!file) {
+    if (!req.file) {
       return res.status(400).json({
         success: false,
         error: "No file uploaded."
       });
     }
 
-    inputPath = file.path;
-
     const tool = String(
       req.body.tool || ""
-    ).trim().toLowerCase();
+    )
+      .trim()
+      .toLowerCase();
 
-    const requestedJobId = String(
+    const jobId = String(
       req.body.jobId || ""
     ).trim();
 
-    const jobId =
-      requestedJobId ||
-      `job-${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2, 10)}`;
-
-    const supportedTools = [
-      "word-to-pdf",
-      "powerpoint-to-pdf",
-      "excel-to-pdf",
-      "pdf-to-word",
-      "pdf-to-powerpoint",
-      "pdf-to-excel"
-    ];
-
-    if (!supportedTools.includes(tool)) {
-      cleanupFile(inputPath);
+    if (!jobId) {
+      safeDelete(req.file.path);
 
       return res.status(400).json({
         success: false,
-        error: `Unsupported conversion tool: ${tool}`
+        error: "Missing job id."
       });
     }
 
-    const outputExtension =
-      extensionForTool(tool);
+    const conversion =
+      conversionMap[tool];
 
-    const originalName =
-      file.originalname || "file";
+    if (!conversion) {
+      safeDelete(req.file.path);
 
-    const baseName =
-      path.basename(
-        originalName,
-        path.extname(originalName)
+      return res.status(400).json({
+        success: false,
+        error:
+          "Unsupported conversion tool: " +
+          tool
+      });
+    }
+
+    const originalName = String(
+      req.body.filename ||
+      req.file.originalname ||
+      "file"
+    );
+
+    const safeName =
+      path.basename(originalName);
+
+    const inputPath =
+      path.join(
+        UPLOAD_DIR,
+        jobId + "-" + safeName
       );
 
-    const outputName =
-      `${safeName(baseName)}.${outputExtension}`;
+    const jobOutputDir =
+      path.join(
+        OUTPUT_DIR,
+        jobId
+      );
+
+    const jobProfileDir =
+      path.join(
+        PROFILE_DIR,
+        jobId
+      );
+
+    fs.mkdirSync(
+      jobOutputDir,
+      { recursive: true }
+    );
+
+    fs.mkdirSync(
+      jobProfileDir,
+      { recursive: true }
+    );
+
+    try {
+      fs.renameSync(
+        req.file.path,
+        inputPath
+      );
+    } catch (error) {
+
+      safeDelete(req.file.path);
+
+      return res.status(500).json({
+        success: false,
+        error:
+          "Unable to prepare uploaded file."
+      });
+    }
+
+    const outputFilename =
+      path.parse(safeName).name +
+      "." +
+      conversion.extension;
 
     jobs.set(jobId, {
       status: "processing",
-      filename: originalName,
-      outputName,
-      outputPath: null,
-      contentType: null,
-      error: null
+      filename: outputFilename
     });
 
     /*
-     * IMPORTANT:
-     * Return the response BEFORE the heavy conversion.
-     * The actual conversion continues asynchronously.
+     * Respond immediately.
      */
     res.json({
       success: true,
-      jobId,
+      jobId: jobId,
       status: "processing"
     });
 
-    setImmediate(async () => {
-      try {
-        await processConversion({
-          jobId,
-          tool,
-          inputPath,
-          outputName
-        });
-      } catch (error) {
-        console.error(
-          "Conversion error:",
-          error
-        );
+    /* =========================
+       LIBREOFFICE ARGUMENTS
+    ========================= */
 
-        const job = jobs.get(jobId);
+    let libreOfficeArgs = [
+      "--headless",
+      "--nologo",
+      "--nodefault",
+      "--nofirststartwizard",
+      "--nolockcheck",
 
-        if (job) {
-          job.status = "error";
-          job.error =
-            error?.message ||
-            "Conversion failed.";
-        }
+      "-env:UserInstallation=file://" +
+        jobProfileDir,
 
-        cleanupFile(inputPath);
-      }
-    });
+      "--convert-to"
+    ];
 
-  } catch (error) {
-    console.error(
-      "Upload/convert request error:",
-      error
-    );
+    /* WORD -> PDF */
 
-    cleanupFile(inputPath);
+    if (tool === "word-to-pdf") {
 
-    if (!res.headersSent) {
-      return res.status(500).json({
-        success: false,
-        error:
-          error?.message ||
-          "Unable to start conversion."
-      });
-    }
-  }
-});
-
-/* =========================================================
-   PROCESS CONVERSION
-========================================================= */
-
-async function processConversion({
-  jobId,
-  tool,
-  inputPath,
-  outputName
-}) {
-  const job = jobs.get(jobId);
-
-  if (!job) {
-    cleanupFile(inputPath);
-    return;
-  }
-
-  console.log(
-    "===================================="
-  );
-
-  console.log(
-    `Starting conversion: ${jobId}`
-  );
-
-  console.log(
-    `Tool: ${tool}`
-  );
-
-  console.log(
-    `Input: ${inputPath}`
-  );
-
-  try {
-    if (tool === "pdf-to-word") {
-      await convertPdfToWord(
-        jobId,
-        inputPath,
-        outputName
+      libreOfficeArgs.push(
+        "pdf:writer_pdf_Export"
       );
-    } else {
-      await convertWithLibreOffice(
-        jobId,
-        inputPath,
-        tool,
-        outputName
+
+      libreOfficeArgs.push(
+        "--outdir",
+        jobOutputDir,
+        inputPath
       );
     }
 
-    cleanupFile(inputPath);
+    /* POWERPOINT -> PDF */
+
+    else if (
+      tool === "powerpoint-to-pdf"
+    ) {
+
+      libreOfficeArgs.push(
+        "pdf:impress_pdf_Export"
+      );
+
+      libreOfficeArgs.push(
+        "--outdir",
+        jobOutputDir,
+        inputPath
+      );
+    }
+
+    /* EXCEL -> PDF */
+
+    else if (
+      tool === "excel-to-pdf"
+    ) {
+
+      libreOfficeArgs.push(
+        "pdf:calc_pdf_Export"
+      );
+
+      libreOfficeArgs.push(
+        "--outdir",
+        jobOutputDir,
+        inputPath
+      );
+    }
+
+    /* PDF -> WORD */
+
+    else if (
+      tool === "pdf-to-word"
+    ) {
+
+      libreOfficeArgs.push(
+        "docx:MS Word 2007 XML"
+      );
+
+      libreOfficeArgs.push(
+        "--infilter=writer_pdf_import",
+        "--outdir",
+        jobOutputDir,
+        inputPath
+      );
+    }
+
+    /* PDF -> POWERPOINT */
+
+    else if (
+      tool === "pdf-to-powerpoint"
+    ) {
+
+      libreOfficeArgs.push(
+        "pptx:Impress MS PowerPoint 2007 XML"
+      );
+
+      libreOfficeArgs.push(
+        "--infilter=draw_pdf_import",
+        "--outdir",
+        jobOutputDir,
+        inputPath
+      );
+    }
+
+    /* PDF -> EXCEL */
+
+    else if (
+      tool === "pdf-to-excel"
+    ) {
+
+      libreOfficeArgs.push(
+        "xlsx:Calc MS Excel 2007 XML"
+      );
+
+      libreOfficeArgs.push(
+        "--infilter=draw_pdf_import",
+        "--outdir",
+        jobOutputDir,
+        inputPath
+      );
+    }
 
     console.log(
-      `Conversion finished: ${jobId}`
+      "================================="
     );
 
-  } catch (error) {
-    console.error(
-      `Conversion failed: ${jobId}`,
-      error
+    console.log(
+      "Starting conversion:",
+      tool
     );
 
-    job.status = "error";
-    job.error =
-      error?.message ||
-      "Conversion failed.";
-
-    cleanupFile(inputPath);
-  }
-}
-
-/* =========================================================
-   PDF -> WORD
-   LOW MEMORY OCR VERSION
-========================================================= */
-
-async function convertPdfToWord(
-  jobId,
-  inputPath,
-  outputName
-) {
-  console.log(
-    "PDF TO WORD ENGINE: low-memory pdftotext + OCR"
-  );
-
-  const job = jobs.get(jobId);
-
-  const workDir =
-    path.join(
-      OUTPUT_DIR,
+    console.log(
+      "Job:",
       jobId
     );
 
-  fs.mkdirSync(
-    workDir,
-    { recursive: true }
-  );
-
-  const textPath =
-    path.join(
-      workDir,
-      "extracted.txt"
-    );
-
-  let text = "";
-
-  /* -------------------------------------------------------
-     STEP 1: Normal PDF text extraction
-  ------------------------------------------------------- */
-
-  try {
     console.log(
-      "Trying pdftotext..."
+      "================================="
     );
 
-    const result =
-      await execFileAsync(
-        "pdftotext",
-        [
-          "-layout",
-          inputPath,
-          textPath
-        ],
-        {
-          maxBuffer: 5 * 1024 * 1024
-        }
-      );
+    /* =========================
+       FINISH CONVERSION
+    ========================= */
 
-    if (
-      fs.existsSync(textPath)
-    ) {
-      text =
-        fs.readFileSync(
-          textPath,
-          "utf8"
-        );
-    }
+    let finished = false;
+    let stableSize = -1;
+    let stableCount = 0;
 
-    console.log(
-      `Extracted text length: ${text.length}`
-    );
+    function finishSuccess(outputFile) {
 
-  } catch (error) {
-    console.log(
-      "pdftotext failed, switching to OCR."
-    );
-  }
-
-  /* -------------------------------------------------------
-     STEP 2: OCR if normal extraction found no text
-  ------------------------------------------------------- */
-
-  if (!text.trim()) {
-    console.log(
-      "No readable text found."
-    );
-
-    console.log(
-      "Starting LOW MEMORY OCR..."
-    );
-
-    text =
-      await runLowMemoryPdfOcr(
-        inputPath,
-        workDir
-      );
-  }
-
-  if (!text.trim()) {
-    text =
-      "No readable text was found in this PDF.";
-  }
-
-  /* -------------------------------------------------------
-     STEP 3: Build DOCX
-  ------------------------------------------------------- */
-
-  console.log(
-    "Creating DOCX..."
-  );
-
-  const outputPath =
-    path.join(
-      workDir,
-      outputName
-    );
-
-  await buildDocxFromText(
-    text,
-    outputPath
-  );
-
-  if (
-    !fs.existsSync(outputPath)
-  ) {
-    throw new Error(
-      "DOCX output was not created."
-    );
-  }
-
-  const stat =
-    fs.statSync(outputPath);
-
-  console.log(
-    `PDF TO WORD finished: ${jobId}`
-  );
-
-  console.log(
-    `Output size: ${stat.size} bytes`
-  );
-
-  job.status = "finished";
-  job.outputPath = outputPath;
-  job.outputName = outputName;
-  job.contentType =
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-}
-
-/* =========================================================
-   LOW MEMORY PDF OCR
-========================================================= */
-
-async function runLowMemoryPdfOcr(
-  inputPath,
-  workDir
-) {
-  let pageCount = 0;
-
-  try {
-    const info =
-      await execFileAsync(
-        "pdfinfo",
-        [inputPath],
-        {
-          maxBuffer: 1024 * 1024
-        }
-      );
-
-    const match =
-      info.stdout.match(
-        /Pages:\s+(\d+)/i
-      );
-
-    if (match) {
-      pageCount =
-        parseInt(match[1], 10);
-    }
-
-  } catch (error) {
-    console.log(
-      "Could not read PDF page count."
-    );
-  }
-
-  if (!pageCount) {
-    throw new Error(
-      "Could not determine PDF page count."
-    );
-  }
-
-  console.log(
-    `PDF pages: ${pageCount}`
-  );
-
-  const pageTexts = [];
-
-  /*
-   * IMPORTANT:
-   * Only ONE page image exists in memory/disk at a time.
-   */
-  for (
-    let page = 1;
-    page <= pageCount;
-    page++
-  ) {
-    console.log(
-      `OCR page ${page}/${pageCount}`
-    );
-
-    const pagePrefix =
-      path.join(
-        workDir,
-        `page-${page}`
-      );
-
-    const imagePath =
-      `${pagePrefix}.jpg`;
-
-    try {
-      /* -----------------------------------------------
-         Render only the current page.
-         120 DPI keeps RAM usage low.
-      ------------------------------------------------ */
-
-      await execFileAsync(
-        "pdftoppm",
-        [
-          "-f",
-          String(page),
-          "-singlefile",
-          "-jpeg",
-          "-r",
-          "120",
-          "-jpegopt",
-          "quality=75",
-          inputPath,
-          pagePrefix
-        ],
-        {
-          maxBuffer: 1024 * 1024
-        }
-      );
-
-      if (
-        !fs.existsSync(imagePath)
-      ) {
-        console.log(
-          `Page ${page}: image not created.`
-        );
-        continue;
+      if (finished) {
+        return;
       }
 
-      let pageText = "";
-
-      /* -----------------------------------------------
-         Bengali + English OCR
-      ------------------------------------------------ */
+      finished = true;
 
       try {
-        const result =
-          await execFileAsync(
-            "tesseract",
-            [
-              imagePath,
-              "stdout",
-              "-l",
-              "ben+eng",
-              "--psm",
-              "3"
-            ],
-            {
-              maxBuffer: 4 * 1024 * 1024
-            }
+
+        const outputBuffer =
+          fs.readFileSync(
+            outputFile
           );
 
-        pageText =
-          result.stdout || "";
+        if (!outputBuffer.length) {
+          throw new Error(
+            "Output file is empty."
+          );
+        }
 
-      } catch (ocrError) {
+        jobs.set(jobId, {
+          status: "finished",
+          outputBuffer:
+            outputBuffer,
+          filename:
+            outputFilename,
+          contentType:
+            conversion.contentType
+        });
+
         console.log(
-          `Bengali OCR failed on page ${page}, trying English fallback.`
+          "CONVERSION FINISHED:",
+          jobId
         );
 
-        try {
-          const fallback =
-            await execFileAsync(
-              "tesseract",
-              [
-                imagePath,
-                "stdout",
-                "-l",
-                "eng",
-                "--psm",
-                "6"
-              ],
-              {
-                maxBuffer: 4 * 1024 * 1024
-              }
+        console.log(
+          "Output size:",
+          outputBuffer.length,
+          "bytes"
+        );
+
+      } catch (error) {
+
+        finished = true;
+
+        jobs.set(jobId, {
+          status: "error",
+          error:
+            "Unable to read conversion output."
+        });
+
+        console.error(
+          "Output read error:",
+          error.message
+        );
+      }
+
+      safeDelete(inputPath);
+
+      cleanupDirectory(
+        jobOutputDir
+      );
+
+      cleanupDirectory(
+        jobProfileDir
+      );
+    }
+
+    function finishError(message) {
+
+      if (finished) {
+        return;
+      }
+
+      finished = true;
+
+      jobs.set(jobId, {
+        status: "error",
+        error: message
+      });
+
+      safeDelete(inputPath);
+
+      cleanupDirectory(
+        jobOutputDir
+      );
+
+      cleanupDirectory(
+        jobProfileDir
+      );
+
+      console.error(
+        "CONVERSION ERROR:",
+        message
+      );
+    }
+
+    /* =========================
+       START LIBREOFFICE
+    ========================= */
+
+    const child =
+      execFile(
+        "libreoffice",
+        libreOfficeArgs,
+        {
+          timeout: 35000,
+          maxBuffer:
+            20 * 1024 * 1024
+        },
+        (
+          error,
+          stdout,
+          stderr
+        ) => {
+
+          console.log(
+            "LibreOffice stdout:",
+            stdout || ""
+          );
+
+          console.log(
+            "LibreOffice stderr:",
+            stderr || ""
+          );
+
+          /*
+           * If output already exists,
+           * use it immediately.
+           */
+          if (!finished) {
+
+            const outputFile =
+              findOutputFile(
+                jobOutputDir,
+                conversion.extension
+              );
+
+            if (outputFile) {
+
+              finishSuccess(
+                outputFile
+              );
+
+              return;
+            }
+          }
+
+          if (finished) {
+            return;
+          }
+
+          if (error) {
+
+            finishError(
+              getLibreOfficeError(
+                tool,
+                stderr,
+                error
+              )
             );
 
-          pageText =
-            fallback.stdout || "";
+            return;
+          }
 
-        } catch (fallbackError) {
-          console.log(
-            `OCR failed on page ${page}.`
+          finishError(
+            "Conversion finished without creating an output file."
           );
         }
-      }
-
-      pageTexts.push(
-        pageText.trim()
       );
 
-    } finally {
-      /*
-       * VERY IMPORTANT:
-       * Delete page image immediately.
-       */
-      cleanupFile(imagePath);
+    /* =========================
+       FAST OUTPUT DETECTION
+    ========================= */
 
-      if (
-        global.gc
-      ) {
-        try {
-          global.gc();
-        } catch (_) {}
-      }
-    }
-  }
+    const outputWatcher =
+      setInterval(() => {
 
-  return pageTexts
-    .filter(Boolean)
-    .join("\n\n\f\n\n");
-}
+        if (finished) {
 
-/* =========================================================
-   DOCX CREATION
-========================================================= */
+          clearInterval(
+            outputWatcher
+          );
 
-async function buildDocxFromText(
-  text,
-  outputPath
-) {
-  const sections =
-    String(text)
-      .split("\f");
-
-  const paragraphs = [];
-
-  for (
-    let i = 0;
-    i < sections.length;
-    i++
-  ) {
-    const section =
-      sections[i];
-
-    const lines =
-      section.split(/\r?\n/);
-
-    for (const line of lines) {
-      paragraphs.push(
-        new Paragraph({
-          children: [
-            new TextRun({
-              text: line || " ",
-              font: "Noto Sans Bengali",
-              size: 22
-            })
-          ],
-          spacing: {
-            after: 80
-          }
-        })
-      );
-    }
-
-    if (
-      i < sections.length - 1
-    ) {
-      paragraphs.push(
-        new Paragraph({
-          pageBreakBefore: true
-        })
-      );
-    }
-  }
-
-  const document =
-    new Document({
-      sections: [
-        {
-          properties: {},
-          children: paragraphs
+          return;
         }
-      ]
-    });
 
-  const buffer =
-    await Packer.toBuffer(
-      document
-    );
+        const outputFile =
+          findOutputFile(
+            jobOutputDir,
+            conversion.extension
+          );
 
-  fs.writeFileSync(
-    outputPath,
-    buffer
-  );
-}
+        if (!outputFile) {
+          return;
+        }
 
-/* =========================================================
-   LIBREOFFICE CONVERSIONS
-========================================================= */
+        let currentSize = 0;
 
-async function convertWithLibreOffice(
-  jobId,
-  inputPath,
-  tool,
-  outputName
-) {
-  const job = jobs.get(jobId);
+        try {
 
-  const workDir =
-    path.join(
-      OUTPUT_DIR,
-      jobId
-    );
+          currentSize =
+            fs.statSync(
+              outputFile
+            ).size;
 
-  fs.mkdirSync(
-    workDir,
-    { recursive: true }
-  );
+        } catch {
+          return;
+        }
 
-  const outputPath =
-    path.join(
-      workDir,
-      outputName
-    );
+        if (
+          currentSize > 0 &&
+          currentSize === stableSize
+        ) {
 
-  console.log(
-    `LibreOffice conversion: ${tool}`
-  );
+          stableCount++;
 
-  const profileDir =
-    path.join(
-      LO_PROFILE_DIR,
-      jobId
-    );
+        } else {
 
-  fs.mkdirSync(
-    profileDir,
-    { recursive: true }
-  );
+          stableSize =
+            currentSize;
 
-  let args = [
-    "--headless",
-    "--convert-to"
-  ];
+          stableCount = 0;
+        }
 
-  if (
-    tool === "word-to-pdf"
-  ) {
-    args.push(
-      "pdf:writer_pdf_Export"
-    );
+        /*
+         * File size stable for
+         * two checks = safe to read.
+         */
+        if (
+          stableCount >= 2
+        ) {
 
-  } else if (
-    tool === "powerpoint-to-pdf"
-  ) {
-    args.push(
-      "pdf:impress_pdf_Export"
-    );
+          clearInterval(
+            outputWatcher
+          );
 
-  } else if (
-    tool === "excel-to-pdf"
-  ) {
-    args.push(
-      "pdf:calc_pdf_Export"
-    );
+          finishSuccess(
+            outputFile
+          );
 
-  } else if (
-    tool === "pdf-to-powerpoint"
-  ) {
-    args.push(
-      "pptx:Impress MS PowerPoint 2007 XML"
-    );
+          /*
+           * LibreOffice may still be
+           * alive after output creation.
+           * Stop it so the worker does
+           * not waste CPU/RAM.
+           */
+          try {
 
-  } else if (
-    tool === "pdf-to-excel"
-  ) {
-    args.push(
-      "xlsx:Calc MS Excel 2007 XML"
-    );
+            if (
+              child &&
+              !child.killed
+            ) {
+              child.kill(
+                "SIGKILL"
+              );
+            }
 
-  } else {
-    throw new Error(
-      `Unsupported LibreOffice tool: ${tool}`
-    );
-  }
+          } catch {}
+        }
 
-  args.push(
-    "--outdir",
-    workDir,
-    inputPath
-  );
+      }, 300);
 
-  const env =
-    {
-      ...process.env,
-      HOME: profileDir
-    };
+    /* =========================
+       HARD TIMEOUT
+    ========================= */
 
-  await execFileAsync(
-    "libreoffice",
-    args,
-    {
-      env,
-      maxBuffer: 5 * 1024 * 1024,
-      timeout: 180000
-    }
-  );
+    setTimeout(() => {
 
-  const generatedFiles =
-    fs.readdirSync(
-      workDir
-    );
+      if (finished) {
+        return;
+      }
 
-  let generated =
-    generatedFiles.find(
-      file =>
-        file !== outputName
-    );
+      clearInterval(
+        outputWatcher
+      );
 
-  if (!generated) {
-    throw new Error(
-      "LibreOffice did not create an output file."
-    );
-  }
+      try {
 
-  const generatedPath =
-    path.join(
-      workDir,
-      generated
-    );
+        if (
+          child &&
+          !child.killed
+        ) {
+          child.kill(
+            "SIGKILL"
+          );
+        }
 
-  /*
-   * Rename LibreOffice output
-   * to the exact requested filename.
-   */
-  if (
-    generatedPath !== outputPath
-  ) {
-    cleanupFile(outputPath);
+      } catch {}
 
-    fs.renameSync(
-      generatedPath,
-      outputPath
-    );
-  }
+      finishError(
+        "LibreOffice conversion timed out."
+      );
 
-  if (
-    !fs.existsSync(outputPath)
-  ) {
-    throw new Error(
-      "Output file was not created."
-    );
-  }
+    }, 35000);
 
-  const stat =
-    fs.statSync(outputPath);
+    /* =========================
+       AUTO DELETE JOB
+    ========================= */
 
-  console.log(
-    `LibreOffice output size: ${stat.size} bytes`
-  );
+    setTimeout(() => {
 
-  job.status = "finished";
-  job.outputPath = outputPath;
-  job.outputName = outputName;
+      jobs.delete(jobId);
 
-  const contentTypes = {
-    "word-to-pdf":
-      "application/pdf",
-
-    "powerpoint-to-pdf":
-      "application/pdf",
-
-    "excel-to-pdf":
-      "application/pdf",
-
-    "pdf-to-powerpoint":
-      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-
-    "pdf-to-excel":
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-  };
-
-  job.contentType =
-    contentTypes[tool] ||
-    "application/octet-stream";
-}
-
-/* =========================================================
-   ERROR HANDLING
-========================================================= */
-
-app.use(
-  (error, req, res, next) => {
-    console.error(
-      "Express error:",
-      error
-    );
-
-    if (
-      error &&
-      error.code === "LIMIT_FILE_SIZE"
-    ) {
-      return res.status(413).json({
-        success: false,
-        error:
-          "File is too large. Maximum size is 50 MB."
-      });
-    }
-
-    if (!res.headersSent) {
-      return res.status(500).json({
-        success: false,
-        error:
-          error?.message ||
-          "Internal server error."
-      });
-    }
-
-    next(error);
+    }, 10 * 60 * 1000);
   }
 );
 
-/* =========================================================
-   START SERVER
-========================================================= */
+/* =========================
+   FIND OUTPUT
+========================= */
+
+function findOutputFile(
+  directory,
+  extension
+) {
+
+  try {
+
+    if (
+      !fs.existsSync(directory)
+    ) {
+      return null;
+    }
+
+    const files =
+      fs.readdirSync(
+        directory
+      );
+
+    const wanted =
+      "." +
+      extension.toLowerCase();
+
+    const match =
+      files.find(
+        file =>
+          path
+            .extname(file)
+            .toLowerCase() ===
+          wanted
+      );
+
+    if (!match) {
+      return null;
+    }
+
+    return path.join(
+      directory,
+      match
+    );
+
+  } catch {
+
+    return null;
+  }
+}
+
+/* =========================
+   HELPERS
+========================= */
+
+function safeDelete(
+  filePath
+) {
+
+  try {
+
+    if (
+      filePath &&
+      fs.existsSync(filePath)
+    ) {
+      fs.unlinkSync(
+        filePath
+      );
+    }
+
+  } catch {}
+}
+
+function cleanupDirectory(
+  directory
+) {
+
+  try {
+
+    if (
+      !fs.existsSync(directory)
+    ) {
+      return;
+    }
+
+    fs.rmSync(
+      directory,
+      {
+        recursive: true,
+        force: true
+      }
+    );
+
+  } catch {}
+}
+
+function getLibreOfficeError(
+  tool,
+  stderr,
+  error
+) {
+
+  if (
+    stderr &&
+    stderr.trim()
+  ) {
+
+    return (
+      "LibreOffice conversion failed: " +
+      stderr.trim()
+    );
+  }
+
+  return (
+    "Conversion failed for " +
+    tool +
+    ". " +
+    (
+      error?.message ||
+      "Unknown conversion error."
+    )
+  );
+}
+
+/* =========================
+   SERVER
+========================= */
+
+const PORT =
+  process.env.PORT || 10000;
 
 app.listen(
   PORT,
-  HOST,
+  "0.0.0.0",
   () => {
+
     console.log(
-      "===================================="
+      "================================="
     );
 
     console.log(
-      "iLovePDF4 Conversion Engine"
+      "iLovePDF4 Free Conversion Engine"
     );
 
     console.log(
-      `Running on port ${PORT}`
+      "Running on port " +
+        PORT
     );
 
     console.log(
-      `Public URL: ${PUBLIC_BASE_URL}`
+      "================================="
     );
 
-    console.log(
-      "Supported server tools:"
-    );
-
-    console.log(
-      " - word-to-pdf"
-    );
-
-    console.log(
-      " - powerpoint-to-pdf"
-    );
-
-    console.log(
-      " - excel-to-pdf"
-    );
-
-    console.log(
-      " - pdf-to-word"
-    );
-
-    console.log(
-      " - pdf-to-powerpoint"
-    );
-
-    console.log(
-      " - pdf-to-excel"
-    );
-
-    console.log(
-      "===================================="
-    );
   }
 );
