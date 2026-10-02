@@ -4,6 +4,16 @@ const fs = require("fs");
 const path = require("path");
 const { execFile } = require("child_process");
 
+const { createCanvas } = require("@napi-rs/canvas");
+const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
+
+const {
+  Document,
+  Packer,
+  Paragraph,
+  ImageRun
+} = require("docx");
+
 const app = express();
 
 app.use(express.json({ limit: "10mb" }));
@@ -210,6 +220,141 @@ const conversionMap = {
 };
 
 /* =========================
+   SCANNED PDF -> DOCX
+   FULL PAGE IMAGE METHOD
+========================= */
+
+async function convertScannedPdfToDocx(
+  inputPath,
+  outputPath
+) {
+  const pdfBytes = new Uint8Array(
+    fs.readFileSync(inputPath)
+  );
+
+  const pdf =
+    await pdfjsLib.getDocument({
+      data: pdfBytes,
+      disableWorker: true
+    }).promise;
+
+  const sections = [];
+
+  for (
+    let pageNumber = 1;
+    pageNumber <= pdf.numPages;
+    pageNumber++
+  ) {
+    const page =
+      await pdf.getPage(pageNumber);
+
+    /*
+     * PDF uses 72 points per inch.
+     * Render at 96 DPI.
+     */
+    const scale = 96 / 72;
+
+    const viewport =
+      page.getViewport({
+        scale
+      });
+
+    const width =
+      Math.ceil(viewport.width);
+
+    const height =
+      Math.ceil(viewport.height);
+
+    const canvas =
+      createCanvas(
+        width,
+        height
+      );
+
+    const context =
+      canvas.getContext("2d");
+
+    await page.render({
+      canvasContext: context,
+      viewport: viewport
+    }).promise;
+
+    const imageBuffer =
+      canvas.toBuffer("image/png");
+
+    /*
+     * PDF points -> DOCX twips
+     * 1 point = 20 twips
+     */
+    const pageWidthTwips =
+      Math.round(
+        (viewport.width / scale) * 20
+      );
+
+    const pageHeightTwips =
+      Math.round(
+        (viewport.height / scale) * 20
+      );
+
+    sections.push({
+      properties: {
+        page: {
+          size: {
+            width: pageWidthTwips,
+            height: pageHeightTwips
+          },
+
+          margin: {
+            top: 0,
+            bottom: 0,
+            left: 0,
+            right: 0,
+            header: 0,
+            footer: 0,
+            gutter: 0
+          }
+        }
+      },
+
+      children: [
+        new Paragraph({
+          spacing: {
+            before: 0,
+            after: 0,
+            line: 0
+          },
+
+          children: [
+            new ImageRun({
+              type: "png",
+              data: imageBuffer,
+
+              transformation: {
+                width: width,
+                height: height
+              }
+            })
+          ]
+        })
+      ]
+    });
+  }
+
+  const doc =
+    new Document({
+      sections: sections
+    });
+
+  const buffer =
+    await Packer.toBuffer(doc);
+
+  fs.writeFileSync(
+    outputPath,
+    buffer
+  );
+}
+
+/* =========================
    CONVERT
 ========================= */
 
@@ -331,6 +476,186 @@ app.post(
     });
 
     /* =========================
+       FINISH CONTROL
+    ========================= */
+
+    let finished = false;
+
+    function finishSuccess(outputFile) {
+
+      if (finished) {
+        return;
+      }
+
+      finished = true;
+
+      try {
+
+        const outputBuffer =
+          fs.readFileSync(
+            outputFile
+          );
+
+        if (!outputBuffer.length) {
+          throw new Error(
+            "Output file is empty."
+          );
+        }
+
+        jobs.set(jobId, {
+          status: "finished",
+          outputBuffer:
+            outputBuffer,
+          filename:
+            outputFilename,
+          contentType:
+            conversion.contentType
+        });
+
+        console.log(
+          "CONVERSION FINISHED:",
+          jobId
+        );
+
+        console.log(
+          "Output size:",
+          outputBuffer.length,
+          "bytes"
+        );
+
+      } catch (error) {
+
+        jobs.set(jobId, {
+          status: "error",
+          error:
+            "Unable to read conversion output."
+        });
+
+        console.error(
+          "Output read error:",
+          error.message
+        );
+      }
+
+      safeDelete(inputPath);
+
+      cleanupDirectory(
+        jobOutputDir
+      );
+
+      cleanupDirectory(
+        jobProfileDir
+      );
+    }
+
+    function finishError(message) {
+
+      if (finished) {
+        return;
+      }
+
+      finished = true;
+
+      jobs.set(jobId, {
+        status: "error",
+        error: message
+      });
+
+      safeDelete(inputPath);
+
+      cleanupDirectory(
+        jobOutputDir
+      );
+
+      cleanupDirectory(
+        jobProfileDir
+      );
+
+      console.error(
+        "CONVERSION ERROR:",
+        message
+      );
+    }
+
+    /* =========================
+       PDF -> WORD
+       FULL PAGE CONVERSION
+    ========================= */
+
+    if (tool === "pdf-to-word") {
+
+      const outputFile =
+        path.join(
+          jobOutputDir,
+          outputFilename
+        );
+
+      console.log(
+        "================================="
+      );
+
+      console.log(
+        "Starting PDF -> WORD conversion"
+      );
+
+      console.log(
+        "Job:",
+        jobId
+      );
+
+      console.log(
+        "Input:",
+        inputPath
+      );
+
+      console.log(
+        "Output:",
+        outputFile
+      );
+
+      console.log(
+        "================================="
+      );
+
+      convertScannedPdfToDocx(
+        inputPath,
+        outputFile
+      )
+        .then(() => {
+
+          if (finished) {
+            return;
+          }
+
+          finishSuccess(
+            outputFile
+          );
+
+        })
+        .catch((error) => {
+
+          console.error(
+            "PDF TO WORD ERROR:",
+            error
+          );
+
+          finishError(
+            error && error.message
+              ? error.message
+              : "PDF to Word conversion failed."
+          );
+
+        });
+
+      /*
+       * IMPORTANT:
+       * Do not start LibreOffice
+       * for PDF -> Word.
+       */
+      return;
+    }
+
+    /* =========================
        LIBREOFFICE ARGUMENTS
     ========================= */
 
@@ -396,24 +721,6 @@ app.post(
       );
     }
 
-    /* PDF -> WORD */
-
-    else if (
-      tool === "pdf-to-word"
-    ) {
-
-      libreOfficeArgs.push(
-        "docx:MS Word 2007 XML"
-      );
-
-      libreOfficeArgs.push(
-        "--infilter=writer_pdf_import",
-        "--outdir",
-        jobOutputDir,
-        inputPath
-      );
-    }
-
     /* PDF -> POWERPOINT */
 
     else if (
@@ -467,112 +774,6 @@ app.post(
     console.log(
       "================================="
     );
-
-    /* =========================
-       FINISH CONVERSION
-    ========================= */
-
-    let finished = false;
-    let stableSize = -1;
-    let stableCount = 0;
-
-    function finishSuccess(outputFile) {
-
-      if (finished) {
-        return;
-      }
-
-      finished = true;
-
-      try {
-
-        const outputBuffer =
-          fs.readFileSync(
-            outputFile
-          );
-
-        if (!outputBuffer.length) {
-          throw new Error(
-            "Output file is empty."
-          );
-        }
-
-        jobs.set(jobId, {
-          status: "finished",
-          outputBuffer:
-            outputBuffer,
-          filename:
-            outputFilename,
-          contentType:
-            conversion.contentType
-        });
-
-        console.log(
-          "CONVERSION FINISHED:",
-          jobId
-        );
-
-        console.log(
-          "Output size:",
-          outputBuffer.length,
-          "bytes"
-        );
-
-      } catch (error) {
-
-        finished = true;
-
-        jobs.set(jobId, {
-          status: "error",
-          error:
-            "Unable to read conversion output."
-        });
-
-        console.error(
-          "Output read error:",
-          error.message
-        );
-      }
-
-      safeDelete(inputPath);
-
-      cleanupDirectory(
-        jobOutputDir
-      );
-
-      cleanupDirectory(
-        jobProfileDir
-      );
-    }
-
-    function finishError(message) {
-
-      if (finished) {
-        return;
-      }
-
-      finished = true;
-
-      jobs.set(jobId, {
-        status: "error",
-        error: message
-      });
-
-      safeDelete(inputPath);
-
-      cleanupDirectory(
-        jobOutputDir
-      );
-
-      cleanupDirectory(
-        jobProfileDir
-      );
-
-      console.error(
-        "CONVERSION ERROR:",
-        message
-      );
-    }
 
     /* =========================
        START LIBREOFFICE
@@ -652,6 +853,9 @@ app.post(
        FAST OUTPUT DETECTION
     ========================= */
 
+    let stableSize = -1;
+    let stableCount = 0;
+
     const outputWatcher =
       setInterval(() => {
 
@@ -721,8 +925,6 @@ app.post(
           /*
            * LibreOffice may still be
            * alive after output creation.
-           * Stop it so the worker does
-           * not waste CPU/RAM.
            */
           try {
 
