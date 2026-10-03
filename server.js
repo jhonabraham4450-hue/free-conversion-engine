@@ -967,6 +967,9 @@ setTimeout(() => {
 setTimeout(() => {
   jobs.delete(jobId);
 }, 10 * 60 * 1000);
+      }
+
+);
 
 /* =========================
    FIND OUTPUT FILE
