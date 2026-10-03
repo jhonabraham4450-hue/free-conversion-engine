@@ -157,39 +157,33 @@ app.get("/download/:jobId", (req, res) => {
 
 const conversionMap = {
   "word-to-pdf": {
-    format: "pdf",
     extension: "pdf",
     contentType: "application/pdf"
   },
 
   "powerpoint-to-pdf": {
-    format: "pdf",
     extension: "pdf",
     contentType: "application/pdf"
   },
 
   "excel-to-pdf": {
-    format: "pdf",
     extension: "pdf",
     contentType: "application/pdf"
   },
 
   "pdf-to-word": {
-    format: "docx",
     extension: "docx",
     contentType:
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
   },
 
   "pdf-to-powerpoint": {
-    format: "pptx",
     extension: "pptx",
     contentType:
       "application/vnd.openxmlformats-officedocument.presentationml.presentation"
   },
 
   "pdf-to-excel": {
-    format: "xlsx",
     extension: "xlsx",
     contentType:
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -198,8 +192,7 @@ const conversionMap = {
 
 /* =========================
    PDF -> WORD
-   Uses pdftoppm
-   No pdfjs/canvas
+   pdftoppm method
 ========================= */
 
 async function convertScannedPdfToDocx(
@@ -344,14 +337,6 @@ async function convertScannedPdfToDocx(
         imagePath
       );
 
-      /*
-       * 96 DPI:
-       * 96 pixels = 1 inch
-       * 1 inch = 1440 twips
-       * therefore:
-       * 1 pixel = 15 twips
-       */
-
       const pageWidthTwips =
         Math.round(
           width * 15
@@ -402,10 +387,7 @@ async function convertScannedPdfToDocx(
             children: [
               new ImageRun({
                 type: "png",
-
-                data:
-                  imageBuffer,
-
+                data: imageBuffer,
                 transformation: {
                   width,
                   height
@@ -429,10 +411,10 @@ async function convertScannedPdfToDocx(
 
     if (
       !buffer ||
-      !buffer.length
+      buffer.length < 1000
     ) {
       throw new Error(
-        "DOCX output is empty."
+        "DOCX output is invalid or empty."
       );
     }
 
@@ -442,7 +424,8 @@ async function convertScannedPdfToDocx(
     );
 
     console.log(
-      "PDF -> WORD DOCX created successfully."
+      "PDF -> WORD completed:",
+      outputPath
     );
 
   } finally {
@@ -453,7 +436,7 @@ async function convertScannedPdfToDocx(
 }
 
 /* =========================
-   CONVERT
+   MAIN CONVERT
 ========================= */
 
 app.post(
@@ -591,11 +574,6 @@ app.post(
       }
     );
 
-    /*
-     * Immediately tell Cloudflare
-     * that the job has started.
-     */
-
     res.json({
       success: true,
       jobId: jobId,
@@ -616,21 +594,46 @@ app.post(
         return;
       }
 
-      finished = true;
-
       try {
+        if (
+          !fs.existsSync(
+            outputFile
+          )
+        ) {
+          throw new Error(
+            "Output file was not created."
+          );
+        }
+
+        const stat =
+          fs.statSync(
+            outputFile
+          );
+
+        if (
+          !stat.isFile() ||
+          stat.size < 1000
+        ) {
+          throw new Error(
+            "Output file is incomplete or empty."
+          );
+        }
+
         const outputBuffer =
           fs.readFileSync(
             outputFile
           );
 
         if (
-          !outputBuffer.length
+          !outputBuffer ||
+          outputBuffer.length < 1000
         ) {
           throw new Error(
-            "Output file is empty."
+            "Output file is invalid."
           );
         }
+
+        finished = true;
 
         jobs.set(
           jobId,
@@ -662,6 +665,8 @@ app.post(
 
       } catch (error) {
 
+        finished = true;
+
         jobs.set(
           jobId,
           {
@@ -669,12 +674,13 @@ app.post(
               "error",
 
             error:
+              error.message ||
               "Unable to read conversion output."
           }
         );
 
         console.error(
-          "Output read error:",
+          "Output validation error:",
           error.message
         );
       }
@@ -736,7 +742,7 @@ app.post(
 
     /* =========================
        PDF -> WORD
-    ========================= */
+========================= */
 
     if (
       tool === "pdf-to-word"
@@ -798,10 +804,8 @@ app.post(
           );
 
           finishError(
-            error &&
-            error.message
-              ? error.message
-              : "PDF to Word conversion failed."
+            error?.message ||
+            "PDF to Word conversion failed."
           );
         });
 
@@ -809,8 +813,8 @@ app.post(
     }
 
     /* =========================
-       LIBREOFFICE
-    ========================= */
+       LIBREOFFICE CONVERSIONS
+========================= */
 
     let libreOfficeArgs = [
       "--headless",
@@ -833,12 +837,6 @@ app.post(
         "pdf:writer_pdf_Export"
       );
 
-      libreOfficeArgs.push(
-        "--outdir",
-        jobOutputDir,
-        inputPath
-      );
-
     } else if (
       tool ===
       "powerpoint-to-pdf"
@@ -848,12 +846,6 @@ app.post(
         "pdf:impress_pdf_Export"
       );
 
-      libreOfficeArgs.push(
-        "--outdir",
-        jobOutputDir,
-        inputPath
-      );
-
     } else if (
       tool ===
       "excel-to-pdf"
@@ -861,12 +853,6 @@ app.post(
 
       libreOfficeArgs.push(
         "pdf:calc_pdf_Export"
-      );
-
-      libreOfficeArgs.push(
-        "--outdir",
-        jobOutputDir,
-        inputPath
       );
 
     } else if (
@@ -879,10 +865,7 @@ app.post(
       );
 
       libreOfficeArgs.push(
-        "--infilter=draw_pdf_import",
-        "--outdir",
-        jobOutputDir,
-        inputPath
+        "--infilter=draw_pdf_import"
       );
 
     } else if (
@@ -895,12 +878,23 @@ app.post(
       );
 
       libreOfficeArgs.push(
-        "--infilter=draw_pdf_import",
-        "--outdir",
-        jobOutputDir,
-        inputPath
+        "--infilter=draw_pdf_import"
       );
+
+    } else {
+
+      finishError(
+        "Unsupported conversion tool."
+      );
+
+      return;
     }
+
+    libreOfficeArgs.push(
+      "--outdir",
+      jobOutputDir,
+      inputPath
+    );
 
     console.log(
       "================================="
@@ -925,7 +919,7 @@ app.post(
         "libreoffice",
         libreOfficeArgs,
         {
-          timeout: 35000,
+          timeout: 60000,
 
           maxBuffer:
             20 * 1024 * 1024
@@ -947,24 +941,34 @@ app.post(
             stderr || ""
           );
 
-          if (!finished) {
-
-            const outputFile =
-              findOutputFile(
-                jobOutputDir,
-                conversion.extension
-              );
-
-            if (outputFile) {
-              finishSuccess(
-                outputFile
-              );
-
-              return;
-            }
+          if (finished) {
+            return;
           }
 
-          if (finished) {
+          /*
+           * IMPORTANT:
+           * Do NOT finish based only on
+           * file size while LibreOffice
+           * is still running.
+           *
+           * Wait until LibreOffice exits.
+           */
+
+          const outputFile =
+            findOutputFile(
+              jobOutputDir,
+              conversion.extension
+            );
+
+          if (
+            !error &&
+            outputFile
+          ) {
+
+            finishSuccess(
+              outputFile
+            );
+
             return;
           }
 
@@ -982,90 +986,16 @@ app.post(
           }
 
           finishError(
-            "Conversion finished without creating an output file."
+            "Conversion finished without creating a valid output file."
           );
         }
       );
 
-    let stableSize = -1;
-    let stableCount = 0;
-
-    const outputWatcher =
-      setInterval(() => {
-
-        if (finished) {
-          clearInterval(
-            outputWatcher
-          );
-
-          return;
-        }
-
-        const outputFile =
-          findOutputFile(
-            jobOutputDir,
-            conversion.extension
-          );
-
-        if (!outputFile) {
-          return;
-        }
-
-        let currentSize = 0;
-
-        try {
-          currentSize =
-            fs.statSync(
-              outputFile
-            ).size;
-
-        } catch {
-          return;
-        }
-
-        if (
-          currentSize > 0 &&
-          currentSize ===
-            stableSize
-        ) {
-
-          stableCount++;
-
-        } else {
-
-          stableSize =
-            currentSize;
-
-          stableCount = 0;
-        }
-
-        if (
-          stableCount >= 2
-        ) {
-
-          clearInterval(
-            outputWatcher
-          );
-
-          finishSuccess(
-            outputFile
-          );
-
-          try {
-
-            if (
-              child &&
-              !child.killed
-            ) {
-              child.kill(
-                "SIGKILL"
-              );
-            }
-
-          } catch {}
-        }
-
-      }, 300);
+    /*
+     * Safety timeout.
+     * Normal successful conversions
+     * finish from LibreOffice callback.
+     */
 
     setTimeout(() => {
 
@@ -1073,12 +1003,7 @@ app.post(
         return;
       }
 
-      clearInterval(
-        outputWatcher
-      );
-
       try {
-
         if (
           child &&
           !child.killed
@@ -1087,14 +1012,17 @@ app.post(
             "SIGKILL"
           );
         }
-
       } catch {}
 
       finishError(
         "LibreOffice conversion timed out."
       );
 
-    }, 35000);
+    }, 60000);
+
+    /*
+     * Remove job after 10 minutes.
+     */
 
     setTimeout(() => {
 
@@ -1107,7 +1035,7 @@ app.post(
 );
 
 /* =========================
-   FIND OUTPUT
+   FIND OUTPUT FILE
 ========================= */
 
 function findOutputFile(
@@ -1133,8 +1061,8 @@ function findOutputFile(
       "." +
       extension.toLowerCase();
 
-    const match =
-      files.find(
+    const validFiles =
+      files.filter(
         file =>
           path
             .extname(file)
@@ -1142,13 +1070,43 @@ function findOutputFile(
           wanted
       );
 
-    if (!match) {
+    if (!validFiles.length) {
       return null;
     }
 
+    /*
+     * Choose the newest valid file.
+     */
+
+    validFiles.sort(
+      (a, b) => {
+
+        const statA =
+          fs.statSync(
+            path.join(
+              directory,
+              a
+            )
+          );
+
+        const statB =
+          fs.statSync(
+            path.join(
+              directory,
+              b
+            )
+          );
+
+        return (
+          statB.mtimeMs -
+          statA.mtimeMs
+        );
+      }
+    );
+
     return path.join(
       directory,
-      match
+      validFiles[0]
     );
 
   } catch {
@@ -1157,7 +1115,7 @@ function findOutputFile(
 }
 
 /* =========================
-   DELETE FILE
+   SAFE DELETE
 ========================= */
 
 function safeDelete(
@@ -1221,7 +1179,6 @@ function getLibreOfficeError(
     stderr &&
     stderr.trim()
   ) {
-
     return (
       "LibreOffice conversion failed: " +
       stderr.trim()
