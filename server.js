@@ -230,7 +230,7 @@ async function convertScannedPdfToDocx(
           [
             "-png",
             "-r",
-            "96",
+            "72",
             inputPath,
             prefix
           ],
