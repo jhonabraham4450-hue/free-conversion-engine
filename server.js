@@ -817,222 +817,156 @@ app.post(
 ========================= */
 
     let libreOfficeArgs = [
-      "--headless",
-      "--nologo",
-      "--nodefault",
-      "--nofirststartwizard",
-      "--nolockcheck",
+  "--headless",
+  "--nologo",
+  "--nodefault",
+  "--nofirststartwizard",
+  "--nolockcheck",
+  "-env:UserInstallation=file://" + jobProfileDir,
+  "--convert-to"
+];
 
-      "-env:UserInstallation=file://" +
-        jobProfileDir,
+if (tool === "word-to-pdf") {
+  libreOfficeArgs.push(
+    "pdf:writer_pdf_Export"
+  );
+} else if (tool === "powerpoint-to-pdf") {
+  libreOfficeArgs.push(
+    "pdf:impress_pdf_Export"
+  );
+} else if (tool === "excel-to-pdf") {
+  libreOfficeArgs.push(
+    "pdf:calc_pdf_Export"
+  );
+} else if (tool === "pdf-to-powerpoint") {
+  libreOfficeArgs.push(
+    "pptx:Impress MS PowerPoint 2007 XML"
+  );
 
-      "--convert-to"
-    ];
+  libreOfficeArgs.push(
+    "--infilter=draw_pdf_import"
+  );
+} else if (tool === "pdf-to-excel") {
+  libreOfficeArgs.push(
+    "xlsx:Calc MS Excel 2007 XML"
+  );
 
-    if (
-      tool === "word-to-pdf"
-    ) {
+  libreOfficeArgs.push(
+    "--infilter=draw_pdf_import"
+  );
+} else {
+  finishError(
+    "Unsupported conversion tool."
+  );
+  return;
+}
 
-      libreOfficeArgs.push(
-        "pdf:writer_pdf_Export"
-      );
+libreOfficeArgs.push(
+  "--outdir",
+  jobOutputDir,
+  inputPath
+);
 
-    } else if (
-      tool ===
-      "powerpoint-to-pdf"
-    ) {
+console.log("=================================");
+console.log("Starting conversion:", tool);
+console.log("Job:", jobId);
+console.log("Input:", inputPath);
+console.log("Output directory:", jobOutputDir);
+console.log("=================================");
 
-      libreOfficeArgs.push(
-        "pdf:impress_pdf_Export"
-      );
+const child = execFile(
+  "libreoffice",
+  libreOfficeArgs,
+  {
+    timeout: 120000,
+    maxBuffer: 50 * 1024 * 1024
+  },
+  (error, stdout, stderr) => {
+    console.log(
+      "LibreOffice stdout:",
+      stdout || ""
+    );
 
-    } else if (
-      tool ===
-      "excel-to-pdf"
-    ) {
+    console.log(
+      "LibreOffice stderr:",
+      stderr || ""
+    );
 
-      libreOfficeArgs.push(
-        "pdf:calc_pdf_Export"
-      );
-
-    } else if (
-      tool ===
-      "pdf-to-powerpoint"
-    ) {
-
-      libreOfficeArgs.push(
-        "pptx:Impress MS PowerPoint 2007 XML"
-      );
-
-      libreOfficeArgs.push(
-        "--infilter=draw_pdf_import"
-      );
-
-    } else if (
-      tool ===
-      "pdf-to-excel"
-    ) {
-
-      libreOfficeArgs.push(
-        "xlsx:Calc MS Excel 2007 XML"
-      );
-
-      libreOfficeArgs.push(
-        "--infilter=draw_pdf_import"
-      );
-
-    } else {
-
-      finishError(
-        "Unsupported conversion tool."
-      );
-
+    if (finished) {
       return;
     }
 
-    libreOfficeArgs.push(
-      "--outdir",
+    const outputFile = findOutputFile(
       jobOutputDir,
-      inputPath
+      conversion.extension
     );
 
-    console.log(
-      "================================="
-    );
-
-    console.log(
-      "Starting conversion:",
-      tool
-    );
-
-    console.log(
-      "Job:",
-      jobId
-    );
-
-    console.log(
-      "================================="
-    );
-
-    const child =
-      execFile(
-        "libreoffice",
-        libreOfficeArgs,
-        {
-          timeout: 60000,
-
-          maxBuffer:
-            20 * 1024 * 1024
-        },
-
-        (
-          error,
-          stdout,
-          stderr
-        ) => {
-
-          console.log(
-            "LibreOffice stdout:",
-            stdout || ""
-          );
-
-          console.log(
-            "LibreOffice stderr:",
-            stderr || ""
-          );
-
-          if (finished) {
-            return;
-          }
-
-          /*
-           * IMPORTANT:
-           * Do NOT finish based only on
-           * file size while LibreOffice
-           * is still running.
-           *
-           * Wait until LibreOffice exits.
-           */
-
-          const outputFile =
-            findOutputFile(
-              jobOutputDir,
-              conversion.extension
-            );
-
-          if (
-            !error &&
-            outputFile
-          ) {
-
-            finishSuccess(
-              outputFile
-            );
-
-            return;
-          }
-
-          if (error) {
-
-            finishError(
-              getLibreOfficeError(
-                tool,
-                stderr,
-                error
-              )
-            );
-
-            return;
-          }
-
-          finishError(
-            "Conversion finished without creating a valid output file."
-          );
-        }
-      );
-
-    /*
-     * Safety timeout.
-     * Normal successful conversions
-     * finish from LibreOffice callback.
-     */
-
-    setTimeout(() => {
-
-      if (finished) {
-        return;
-      }
-
+    if (outputFile) {
       try {
+        const stat = fs.statSync(outputFile);
+
+        console.log(
+          "Output file found:",
+          outputFile
+        );
+
+        console.log(
+          "Output size:",
+          stat.size,
+          "bytes"
+        );
+
         if (
-          child &&
-          !child.killed
+          stat.isFile() &&
+          stat.size >= 1000
         ) {
-          child.kill(
-            "SIGKILL"
-          );
+          finishSuccess(outputFile);
+          return;
         }
-      } catch {}
+      } catch (e) {
+        console.error(
+          "Output check failed:",
+          e.message
+        );
+      }
+    }
 
+    if (error) {
       finishError(
-        "LibreOffice conversion timed out."
+        getLibreOfficeError(
+          tool,
+          stderr,
+          error
+        )
       );
+      return;
+    }
 
-    }, 60000);
-
-    /*
-     * Remove job after 10 minutes.
-     */
-
-    setTimeout(() => {
-
-      jobs.delete(
-        jobId
-      );
-
-    }, 10 * 60 * 1000);
+    finishError(
+      "LibreOffice did not create a valid output file."
+    );
   }
 );
+
+setTimeout(() => {
+  if (finished) {
+    return;
+  }
+
+  try {
+    if (child && !child.killed) {
+      child.kill("SIGKILL");
+    }
+  } catch {}
+
+  finishError(
+    "LibreOffice conversion timed out."
+  );
+}, 120000);
+
+setTimeout(() => {
+  jobs.delete(jobId);
+}, 10 * 60 * 1000);
 
 /* =========================
    FIND OUTPUT FILE
