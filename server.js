@@ -592,7 +592,23 @@ app.post(
       }
 
       inputPath = req.file.path;
+      
+// Preserve original file extension for LibreOffice
+const originalExt = path.extname(
+  req.file.originalname || ""
+).toLowerCase();
 
+if (originalExt) {
+  const renamedInputPath =
+    inputPath + originalExt;
+
+  fs.renameSync(
+    inputPath,
+    renamedInputPath
+  );
+
+  inputPath = renamedInputPath;
+}
       const tool =
         String(
           req.body.tool ||
