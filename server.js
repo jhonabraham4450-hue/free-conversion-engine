@@ -316,23 +316,42 @@ async function convertScannedPdfToDocx(inputPath, outputPath) {
     // PNG SIZE
     // ------------------------------------------------
 
-    function getPngSize(filePath) {
-      const buffer = fs.readFileSync(filePath);
+    function getJpegSize(filePath) {
+  const buffer = fs.readFileSync(filePath);
 
-      if (
-        buffer.length < 24 ||
-        buffer.readUInt32BE(0) !== 0x89504e47
-      ) {
-        throw new Error(
-          "Invalid PNG output."
-        );
-      }
+  if (buffer.length < 4 || buffer[0] !== 0xff || buffer[1] !== 0xd8) {
+    throw new Error("Invalid JPEG output.");
+  }
 
+  let offset = 2;
+
+  while (offset < buffer.length) {
+    if (buffer[offset] !== 0xff) {
+      offset++;
+      continue;
+    }
+
+    const marker = buffer[offset + 1];
+
+    if (
+      marker >= 0xc0 &&
+      marker <= 0xc3
+    ) {
       return {
-        width: buffer.readUInt32BE(16),
-        height: buffer.readUInt32BE(20)
+        height: buffer.readUInt16BE(offset + 5),
+        width: buffer.readUInt16BE(offset + 7)
       };
     }
+
+    const segmentLength = buffer.readUInt16BE(offset + 2);
+
+    if (!segmentLength) break;
+
+    offset += 2 + segmentLength;
+  }
+
+  throw new Error("Could not read JPEG dimensions.");
+}
 
     // ------------------------------------------------
     // OCR
@@ -396,10 +415,7 @@ async function convertScannedPdfToDocx(inputPath, outputPath) {
       const imageBuffer =
         fs.readFileSync(imagePath);
 
-      const {
-        width,
-        height
-      } = getPngSize(imagePath);
+      const { width, height } = getJpegSize(imagePath);
 
       // ------------------------------------------------
       // OCR
