@@ -875,18 +875,255 @@ if (originalExt) {
       // PDF -> POWERPOINT
       // ------------------------------------------------
 
-      else if (
-        tool === "pdf-to-powerpoint"
-      ) {
+      // ------------------------------------------------
+// PDF -> POWERPOINT
+// ------------------------------------------------
 
-        libreOfficeArgs.push(
-          "pptx:Impress MS PowerPoint 2007 XML"
+else if (
+  tool === "pdf-to-powerpoint"
+) {
+
+  // PDF -> PNG pages
+  // তারপর প্রতিটি PDF page = 1 PowerPoint slide
+
+  const pptTempDir = fs.mkdtempSync(
+    path.join(
+      os.tmpdir(),
+      "pdf-ppt-"
+    )
+  );
+
+  try {
+
+    const prefix =
+      path.join(
+        pptTempDir,
+        "page"
+      );
+
+    await new Promise(
+      (resolve, reject) => {
+
+        execFile(
+          "pdftoppm",
+          [
+            "-png",
+            "-r",
+            "120",
+            inputPath,
+            prefix
+          ],
+          {
+            timeout: 180000,
+            maxBuffer:
+              50 * 1024 * 1024
+          },
+          (
+            error,
+            stdout,
+            stderr
+          ) => {
+
+            if (error) {
+
+              reject(
+                new Error(
+                  stderr?.trim() ||
+                  error.message ||
+                  "PDF rendering failed."
+                )
+              );
+
+              return;
+            }
+
+            resolve();
+          }
         );
 
-        libreOfficeArgs.push(
-          "--infilter=draw_pdf_import"
-        );
       }
+    );
+
+    const pageFiles =
+      fs.readdirSync(
+        pptTempDir
+      )
+      .filter(
+        file =>
+          /^page-\d+\.png$/i.test(file)
+      )
+      .sort(
+        (a,b) => {
+
+          const na =
+            parseInt(
+              a.match(/\d+/)[0],
+              10
+            );
+
+          const nb =
+            parseInt(
+              b.match(/\d+/)[0],
+              10
+            );
+
+          return na - nb;
+        }
+      );
+
+    if (!pageFiles.length) {
+
+      throw new Error(
+        "No PDF pages were rendered."
+      );
+
+    }
+
+    const pptx =
+      new pptxgen();
+
+    pptx.layout =
+      "LAYOUT_STANDARD";
+
+    pptx.author =
+      "iLovePDF4";
+
+    pptx.subject =
+      "PDF to PowerPoint";
+
+    pptx.title =
+      outputFilename;
+
+    pptx.company =
+      "iLovePDF4";
+
+    pptx.lang =
+      "en-US";
+
+    for (
+      const pageFile of pageFiles
+    ) {
+
+      const pagePath =
+        path.join(
+          pptTempDir,
+          pageFile
+        );
+
+      const slide =
+        pptx.addSlide();
+
+      slide.background = {
+        color: "FFFFFF"
+      };
+
+      slide.addImage({
+        path: pagePath,
+        x: 0,
+        y: 0,
+        w: 10,
+        h: 5.625
+      });
+
+    }
+
+    await pptx.writeFile({
+      fileName:
+        outputPath
+    });
+
+    if (
+      !fs.existsSync(
+        outputPath
+      )
+    ) {
+
+      throw new Error(
+        "PowerPoint output was not created."
+      );
+
+    }
+
+    const stat =
+      fs.statSync(
+        outputPath
+      );
+
+    if (
+      !stat.isFile() ||
+      stat.size < 10000
+    ) {
+
+      throw new Error(
+        "PowerPoint output is invalid."
+      );
+
+    }
+
+    jobs.set(
+      jobId,
+      {
+        status: "finished",
+        outputPath,
+        filename:
+          outputFilename,
+        error: null
+      }
+    );
+
+    console.log(
+      "PDF -> POWERPOINT FINISHED:",
+      outputPath
+    );
+
+    console.log(
+      "PPTX size:",
+      stat.size,
+      "bytes"
+    );
+
+  } catch (error) {
+
+    console.error(
+      "PDF -> POWERPOINT error:",
+      error
+    );
+
+    jobs.set(
+      jobId,
+      {
+        status: "error",
+        outputPath: null,
+        filename:
+          outputFilename,
+        error:
+          error.message ||
+          "PDF to PowerPoint conversion failed."
+      }
+    );
+
+  } finally {
+
+    cleanupDirectory(
+      pptTempDir
+    );
+
+  }
+
+  try {
+    fs.unlinkSync(inputPath);
+  } catch {}
+
+  setTimeout(
+    () => {
+      jobs.delete(jobId);
+      cleanupDirectory(jobDir);
+    },
+    10 * 60 * 1000
+  );
+
+  return;
+}
 
       // ------------------------------------------------
       // PDF -> EXCEL
