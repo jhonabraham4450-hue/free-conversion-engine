@@ -829,14 +829,16 @@ app.post(
               (resolve, reject) => {
 
                 execFile(
-                  "pdftoppm",
-                  [
-                    "-png",
-                    "-r",
-                    "120",
-                    inputPath,
-                    prefix
-                  ],
+  "pdftoppm",
+  [
+    "-jpeg",
+    "-jpegopt",
+    "quality=82",
+    "-r",
+    "100",
+    inputPath,
+    prefix
+  ],
                   {
                     timeout: 300000,
                     maxBuffer:
@@ -872,14 +874,14 @@ app.post(
             // ------------------------------------------
 
             const pageFiles =
-              fs
-                .readdirSync(tempDir)
-                .filter(
-                  file =>
-                    /^page-\d+\.png$/i.test(
-                      file
-                    )
-                )
+  fs
+    .readdirSync(tempDir)
+    .filter(
+      file =>
+        /^page-\d+\.jpg$/i.test(
+          file
+        )
+    )
                 .sort(
                   (a, b) => {
 
