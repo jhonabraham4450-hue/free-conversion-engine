@@ -251,15 +251,16 @@ async function convertScannedPdfToDocx(inputPath, outputPath) {
 
     await new Promise((resolve, reject) => {
       execFile(
-        "pdftoppm",
-        [
-          "-png",
-          "-r",
-          "96",
-          inputPath,
-          prefix
-        ],
-        {
+  "pdftoppm",
+  [
+    "-jpeg",
+    "-jpegopt",
+    "quality=82",
+    "-r",
+    "100",
+    inputPath,
+    prefix
+  ],
           timeout: 180000,
           maxBuffer: 50 * 1024 * 1024
         },
@@ -283,7 +284,7 @@ async function convertScannedPdfToDocx(inputPath, outputPath) {
     const files = fs
       .readdirSync(tempDir)
       .filter(file =>
-        /^page-\d+\.png$/i.test(file)
+        /^page-\d+\.jpg$/i.test(file)
       )
       .sort((a, b) => {
         const na = parseInt(
@@ -442,7 +443,7 @@ async function convertScannedPdfToDocx(inputPath, outputPath) {
 
           children: [
             new ImageRun({
-              type: "png",
+              type: "jpg",
               data: imageBuffer,
 
               transformation: {
