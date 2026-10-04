@@ -924,9 +924,7 @@ app.post(
             const pptx =
               new pptxgen();
 
-            pptx.layout =
-              "LAYOUT_STANDARD";
-
+            pptx.layout = "LAYOUT_STANDARD (4:3)";
             pptx.author =
               "iLovePDF4";
 
