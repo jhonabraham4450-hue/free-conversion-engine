@@ -921,10 +921,16 @@ app.post(
             // CREATE POWERPOINT
             // ------------------------------------------
 
-            const pptx =
-              new pptxgen();
+            const pptx = new pptxgen();
 
-            pptx.layout = "LAYOUT_STANDARD (4:3)";
+pptx.defineLayout({
+  name: "PDF_PAGE",
+  width: 10,
+  height: 5.625
+});
+
+pptx.layout = "PDF_PAGE";
+            
             pptx.author =
               "iLovePDF4";
 
