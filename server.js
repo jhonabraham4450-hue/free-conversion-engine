@@ -250,36 +250,37 @@ async function convertScannedPdfToDocx(inputPath, outputPath) {
     // ------------------------------------------------
 
     await new Promise((resolve, reject) => {
-      execFile(
-  "pdftoppm",
-  [
-    "-jpeg",
-    "-jpegopt",
-    "quality=82",
-    "-r",
-    "100",
-    inputPath,
-    prefix
-  ],
-          timeout: 180000,
-          maxBuffer: 50 * 1024 * 1024
-        },
-        (error, stdout, stderr) => {
-          if (error) {
-            reject(
-              new Error(
-                stderr?.trim() ||
-                error.message ||
-                "PDF rendering failed."
-              )
-            );
-            return;
-          }
+  execFile(
+    "pdftoppm",
+    [
+      "-jpeg",
+      "-jpegopt",
+      "quality=82",
+      "-r",
+      "100",
+      inputPath,
+      prefix
+    ],
+    {
+      timeout: 180000,
+      maxBuffer: 50 * 1024 * 1024
+    },
+    (error, stdout, stderr) => {
+      if (error) {
+        reject(
+          new Error(
+            stderr?.trim() ||
+            error.message ||
+            "PDF rendering failed."
+          )
+        );
+        return;
+      }
 
-          resolve();
-        }
-      );
-    });
+      resolve();
+    }
+  );
+});
 
     const files = fs
       .readdirSync(tempDir)
