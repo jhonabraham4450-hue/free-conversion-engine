@@ -782,7 +782,7 @@ async function convertScannedPdfToDocx(
         execFile(
           command,
           ["-png", "-r", "72", inputPath, prefix],
-          { timeout: 30000, maxBuffer: 50 * 1024 * 1024 },
+          { timeout: 180000, maxBuffer: 50 * 1024 * 1024 },
           (error, stdout, stderr) => {
             if (error) {
               reject(new Error(
