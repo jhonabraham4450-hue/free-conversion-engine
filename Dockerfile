@@ -1,21 +1,25 @@
 FROM node:20-bookworm
 
-RUN apt-get update \
-    && apt-get install -y \
-       libreoffice \
-       poppler-utils \
-       tesseract-ocr \
-       tesseract-ocr-ben \
-       tesseract-ocr-eng \
-    && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
 
-COPY package.json ./
+RUN apt-get update && apt-get install -y \
+    libreoffice \
+    poppler-utils \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    python3 \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY package*.json ./
+
 RUN npm install
 
-COPY server.js ./
+COPY . .
+
+ENV NODE_ENV=production
+ENV PORT=10000
 
 EXPOSE 10000
 
-CMD ["npm", "start"]
+CMD ["node", "server.js"]
