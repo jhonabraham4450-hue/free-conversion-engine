@@ -1038,19 +1038,62 @@ async function convertScannedPdfToDocx(
       );
 
 
-      const imageBuffer =
-        fs.readFileSync(
-          imagePath
+      const jpgPath =
+  path.join(
+    tempDir,
+    `page-${i + 1}.jpg`
+  );
+
+await new Promise((resolve, reject) => {
+
+  execFile(
+    "convert",
+    [
+      imagePath,
+      "-quality",
+      "82",
+      "-strip",
+      jpgPath
+    ],
+    {
+      timeout: 60000,
+      maxBuffer: 20 * 1024 * 1024
+    },
+    (error, stdout, stderr) => {
+
+      if (error) {
+
+        reject(
+          new Error(
+            stderr?.trim() ||
+            error.message ||
+            "Image compression failed."
+          )
         );
 
+        return;
+      }
 
-      const {
-        width,
-        height
-      } =
-        getPngSize(
-          imagePath
-        );
+      resolve();
+
+    }
+  );
+
+});
+
+const imageBuffer =
+  fs.readFileSync(
+    jpgPath
+  );
+
+
+const {
+  width,
+  height
+} =
+  getPngSize(
+    imagePath
+  );
 
 
       console.log(
