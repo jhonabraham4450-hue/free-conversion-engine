@@ -305,16 +305,15 @@ const conversionMap = {
 
   "pdf-to-excel": {
 
-    input: [
-      "pdf"
-    ],
-
+    input: ["pdf"],
     output: "xlsx",
+    extension: ".xlsx"
 
-    extension:
-      ".xlsx"
+  },
 
-  }
+  "protect-pdf": { input:["pdf"], output:"pdf", extension:".pdf" },
+  "unlock-pdf": { input:["pdf"], output:"pdf", extension:".pdf" },
+  "ocr-pdf": { input:["pdf"], output:"pdf", extension:".pdf" }
 
 };
 
@@ -775,10 +774,6 @@ async function convertScannedPdfToDocx(
 
 
     // ==================================================
-    // RENDER PDF
-    // ==================================================
-
-        // ==================================================
     // RENDER PDF - PDF -> WORD ONLY
     // ==================================================
 
@@ -786,29 +781,17 @@ async function convertScannedPdfToDocx(
       return new Promise((resolve, reject) => {
         execFile(
           command,
-          [
-            "-png",
-            "-r",
-            "72",
-            inputPath,
-            prefix
-          ],
-          {
-            timeout: 30000,
-            maxBuffer: 50 * 1024 * 1024
-          },
+          ["-png", "-r", "72", inputPath, prefix],
+          { timeout: 30000, maxBuffer: 50 * 1024 * 1024 },
           (error, stdout, stderr) => {
             if (error) {
-              reject(
-                new Error(
-                  stderr?.trim() ||
-                  error.message ||
-                  `${command} rendering failed.`
-                )
-              );
+              reject(new Error(
+                stderr?.trim() ||
+                error.message ||
+                `${command} rendering failed.`
+              ));
               return;
             }
-
             resolve();
           }
         );
@@ -819,10 +802,7 @@ async function convertScannedPdfToDocx(
       await renderPdf("pdftocairo");
       console.log("PDF rendered using pdftocairo.");
     } catch (firstError) {
-      console.log(
-        "pdftocairo failed. Trying pdftoppm..."
-      );
-
+      console.log("pdftocairo failed. Trying pdftoppm...");
       try {
         await renderPdf("pdftoppm");
         console.log("PDF rendered using pdftoppm.");
@@ -1702,6 +1682,93 @@ app.post(
 
         return;
 
+      }
+
+
+      // ==================================================
+      // EXTRA PDF TOOLS
+      // protect / unlock / OCR
+      // ==================================================
+
+      if (["protect-pdf","unlock-pdf","ocr-pdf"].includes(tool)) {
+
+        try {
+
+          const password = String(req.body.password || "");
+
+          if (tool === "protect-pdf" && !password) {
+            throw new Error("Password is required for Protect PDF.");
+          }
+
+          const run = (command, args, timeout=300000) => new Promise((resolve,reject) => {
+            execFile(command,args,{timeout,maxBuffer:50*1024*1024},(error,stdout,stderr)=>{
+              if(error){
+                reject(new Error((stderr||error.message||`${command} failed`).trim()));
+                return;
+              }
+              resolve(stdout);
+            });
+          });
+
+          if (tool === "protect-pdf") {
+            await run("qpdf", [
+              "--encrypt", "", password, "256",
+              "--",
+              inputPath,
+              outputPath
+            ]);
+          }
+
+          if (tool === "unlock-pdf") {
+            if (password) {
+              await run("qpdf", ["--password=" + password, "--decrypt", inputPath, outputPath]);
+            } else {
+              await run("qpdf", ["--decrypt", inputPath, outputPath]);
+            }
+          }
+
+          if (tool === "ocr-pdf") {
+            await run("ocrmypdf", [
+              "--force-ocr",
+              "--deskew",
+              "--optimize", "1",
+              inputPath,
+              outputPath
+            ], 600000);
+          }
+
+          if (!fs.existsSync(outputPath) || fs.statSync(outputPath).size < 100) {
+            throw new Error("Output PDF was not created correctly.");
+          }
+
+          jobs.set(jobId, {
+            status:"finished",
+            outputPath,
+            filename:outputFilename,
+            error:null
+          });
+
+        } catch(error) {
+
+          console.error(`${tool} error:`, error);
+
+          jobs.set(jobId, {
+            status:"error",
+            outputPath:null,
+            filename:outputFilename,
+            error:error.message || `${tool} failed.`
+          });
+
+        }
+
+        try { fs.unlinkSync(inputPath); } catch {}
+
+        setTimeout(() => {
+          jobs.delete(jobId);
+          cleanupDirectory(jobDir);
+        }, 10 * 60 * 1000);
+
+        return;
       }
 
 
