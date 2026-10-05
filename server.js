@@ -1051,7 +1051,7 @@ await new Promise((resolve, reject) => {
     [
       imagePath,
       "-quality",
-      "82",
+      "60",
       "-strip",
       jpgPath
     ],
