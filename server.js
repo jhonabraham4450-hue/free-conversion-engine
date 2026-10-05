@@ -311,9 +311,23 @@ const conversionMap = {
 
   },
 
-  "protect-pdf": { input:["pdf"], output:"pdf", extension:".pdf" },
-  "unlock-pdf": { input:["pdf"], output:"pdf", extension:".pdf" },
-  "ocr-pdf": { input:["pdf"], output:"pdf", extension:".pdf" }
+  "protect-pdf": {
+    input:["pdf"],
+    output:"pdf",
+    extension:".pdf"
+  },
+
+  "unlock-pdf": {
+    input:["pdf"],
+    output:"pdf",
+    extension:".pdf"
+  },
+
+  "ocr-pdf": {
+    input:["pdf"],
+    output:"pdf",
+    extension:".pdf"
+  }
 
 };
 
@@ -778,39 +792,101 @@ async function convertScannedPdfToDocx(
     // ==================================================
 
     async function renderPdf(command) {
-      return new Promise((resolve, reject) => {
-        execFile(
-          command,
-          ["-png", "-r", "72", inputPath, prefix],
-          { timeout: 180000, maxBuffer: 50 * 1024 * 1024 },
-          (error, stdout, stderr) => {
-            if (error) {
-              reject(new Error(
-                stderr?.trim() ||
-                error.message ||
-                `${command} rendering failed.`
-              ));
-              return;
+
+      return new Promise(
+        (
+          resolve,
+          reject
+        ) => {
+
+          execFile(
+            command,
+
+            [
+              "-png",
+              "-r",
+              "72",
+              inputPath,
+              prefix
+            ],
+
+            {
+              timeout:
+                180000,
+
+              maxBuffer:
+                50 * 1024 * 1024
+            },
+
+            (
+              error,
+              stdout,
+              stderr
+            ) => {
+
+              if (error) {
+
+                reject(
+                  new Error(
+                    stderr?.trim() ||
+                    error.message ||
+                    `${command} rendering failed.`
+                  )
+                );
+
+                return;
+
+              }
+
+              resolve();
+
             }
-            resolve();
-          }
-        );
-      });
+          );
+
+        }
+      );
+
     }
 
+
     try {
-      await renderPdf("pdftocairo");
-      console.log("PDF rendered using pdftocairo.");
-    } catch (firstError) {
-      console.log("pdftocairo failed. Trying pdftoppm...");
+
+      await renderPdf(
+        "pdftocairo"
+      );
+
+      console.log(
+        "PDF rendered using pdftocairo."
+      );
+
+    } catch (
+      firstError
+    ) {
+
+      console.log(
+        "pdftocairo failed. Trying pdftoppm..."
+      );
+
       try {
-        await renderPdf("pdftoppm");
-        console.log("PDF rendered using pdftoppm.");
-      } catch (secondError) {
+
+        await renderPdf(
+          "pdftoppm"
+        );
+
+        console.log(
+          "PDF rendered using pdftoppm."
+        );
+
+      } catch (
+        secondError
+      ) {
+
         throw new Error(
           "PDF rendering failed. Both pdftocairo and pdftoppm failed."
         );
+
       }
+
     }
 
 
@@ -999,21 +1075,19 @@ async function convertScannedPdfToDocx(
               );
 
             }
-
           );
 
         }
       );
 
     }
-
-
-    // ==================================================
+        // ==================================================
     // CREATE DOCX SECTIONS
     // ==================================================
 
     const sections =
       [];
+
 
 
     for (
@@ -1039,61 +1113,79 @@ async function convertScannedPdfToDocx(
 
 
       const jpgPath =
-  path.join(
-    tempDir,
-    `page-${i + 1}.jpg`
-  );
-
-await new Promise((resolve, reject) => {
-
-  execFile(
-    "convert",
-    [
-      imagePath,
-      "-quality",
-      "60",
-      "-strip",
-      jpgPath
-    ],
-    {
-      timeout: 60000,
-      maxBuffer: 20 * 1024 * 1024
-    },
-    (error, stdout, stderr) => {
-
-      if (error) {
-
-        reject(
-          new Error(
-            stderr?.trim() ||
-            error.message ||
-            "Image compression failed."
-          )
+        path.join(
+          tempDir,
+          `page-${i + 1}.jpg`
         );
 
-        return;
-      }
 
-      resolve();
+      await new Promise(
+        (
+          resolve,
+          reject
+        ) => {
 
-    }
-  );
+          execFile(
+            "convert",
 
-});
+            [
+              imagePath,
+              "-quality",
+              "82",
+              "-strip",
+              jpgPath
+            ],
 
-const imageBuffer =
-  fs.readFileSync(
-    jpgPath
-  );
+            {
+              timeout:
+                60000,
+
+              maxBuffer:
+                20 * 1024 * 1024
+            },
+
+            (
+              error,
+              stdout,
+              stderr
+            ) => {
+
+              if (error) {
+
+                reject(
+                  new Error(
+                    stderr?.trim() ||
+                    error.message ||
+                    "Image compression failed."
+                  )
+                );
+
+                return;
+
+              }
+
+              resolve();
+
+            }
+          );
+
+        }
+      );
 
 
-const {
-  width,
-  height
-} =
-  getPngSize(
-    imagePath
-  );
+      const imageBuffer =
+        fs.readFileSync(
+          jpgPath
+        );
+
+
+      const {
+        width,
+        height
+      } =
+        getPngSize(
+          imagePath
+        );
 
 
       console.log(
@@ -1152,7 +1244,7 @@ const {
             new ImageRun({
 
               type:
-                "jpg",
+                "png",
 
               data:
                 imageBuffer,
@@ -1362,16 +1454,25 @@ function getLibreOfficeError(
   );
 
 }
+
+
 // ==================================================
 // MAIN CONVERT API
 // ==================================================
 
 app.post(
   "/convert",
-  upload.single("file"),
-  async (req, res) => {
 
-    let inputPath = null;
+  upload.single("file"),
+
+  async (
+    req,
+    res
+  ) => {
+
+    let inputPath =
+      null;
+
 
     try {
 
@@ -1379,14 +1480,22 @@ app.post(
       // CHECK FILE
       // ------------------------------------------------
 
-      if (!req.file) {
+      if (
+        !req.file
+      ) {
 
         return res.status(400).json({
-          success: false,
-          error: "No file uploaded."
+
+          success:
+            false,
+
+          error:
+            "No file uploaded."
+
         });
 
       }
+
 
       inputPath =
         req.file.path;
@@ -1402,15 +1511,20 @@ app.post(
         ).toLowerCase();
 
 
-      if (originalExt) {
+      if (
+        originalExt
+      ) {
 
         const renamedInputPath =
-          inputPath + originalExt;
+          inputPath +
+          originalExt;
+
 
         fs.renameSync(
           inputPath,
           renamedInputPath
         );
+
 
         inputPath =
           renamedInputPath;
@@ -1436,20 +1550,24 @@ app.post(
         "================================="
       );
 
+
       console.log(
         "Starting conversion:",
         tool
       );
+
 
       console.log(
         "Original filename:",
         req.file.originalname
       );
 
+
       console.log(
         "Input:",
         inputPath
       );
+
 
       console.log(
         "================================="
@@ -1461,21 +1579,32 @@ app.post(
       // ------------------------------------------------
 
       const conversion =
-        conversionMap[tool];
+        conversionMap[
+          tool
+        ];
 
 
-      if (!conversion) {
+      if (
+        !conversion
+      ) {
 
         try {
+
           fs.unlinkSync(
             inputPath
           );
+
         } catch {}
 
+
         return res.status(400).json({
-          success: false,
+
+          success:
+            false,
+
           error:
             "Unsupported conversion tool."
+
         });
 
       }
@@ -1501,7 +1630,8 @@ app.post(
       fs.mkdirSync(
         jobDir,
         {
-          recursive: true
+          recursive:
+            true
         }
       );
 
@@ -1542,6 +1672,7 @@ app.post(
       jobs.set(
         jobId,
         {
+
           status:
             "processing",
 
@@ -1553,12 +1684,13 @@ app.post(
 
           error:
             null
+
         }
       );
 
 
       // ------------------------------------------------
-      // SEND JOB ID IMMEDIATELY
+      // RESPONSE
       // ------------------------------------------------
 
       res.json({
@@ -1569,7 +1701,10 @@ app.post(
         jobId,
 
         status:
-          "processing"
+          "processing",
+
+        filename:
+          outputFilename
 
       });
 
@@ -1598,7 +1733,7 @@ app.post(
           ) {
 
             throw new Error(
-              "DOCX output file was not created."
+              "PDF to Word output was not created."
             );
 
           }
@@ -1616,7 +1751,7 @@ app.post(
           ) {
 
             throw new Error(
-              "DOCX output is invalid."
+              "PDF to Word output is invalid."
             );
 
           }
@@ -1643,12 +1778,10 @@ app.post(
 
 
           console.log(
-            "PDF -> WORD FINISHED:"
-          );
-
-          console.log(
+            "PDF -> WORD FINISHED:",
             outputPath
           );
+
 
           console.log(
             "DOCX size:",
@@ -1690,10 +1823,6 @@ app.post(
         }
 
 
-        // ------------------------------------------------
-        // REMOVE INPUT
-        // ------------------------------------------------
-
         try {
 
           fs.unlinkSync(
@@ -1702,10 +1831,6 @@ app.post(
 
         } catch {}
 
-
-        // ------------------------------------------------
-        // CLEANUP AFTER 10 MINUTES
-        // ------------------------------------------------
 
         setTimeout(
           () => {
@@ -1719,16 +1844,16 @@ app.post(
             );
 
           },
+
           10 * 60 * 1000
+
         );
 
 
         return;
 
       }
-
-
-      // ==================================================
+            // ==================================================
       // EXTRA PDF TOOLS
       // protect / unlock / OCR
       // ==================================================
@@ -1737,81 +1862,275 @@ app.post(
 
         try {
 
-          const password = String(req.body.password || "");
+          const password =
+            String(
+              req.body.password || ""
+            );
 
-          if (tool === "protect-pdf" && !password) {
-            throw new Error("Password is required for Protect PDF.");
+
+          if (
+            tool === "protect-pdf" &&
+            !password
+          ) {
+
+            throw new Error(
+              "Password is required for Protect PDF."
+            );
+
           }
 
-          const run = (command, args, timeout=300000) => new Promise((resolve,reject) => {
-            execFile(command,args,{timeout,maxBuffer:50*1024*1024},(error,stdout,stderr)=>{
-              if(error){
-                reject(new Error((stderr||error.message||`${command} failed`).trim()));
-                return;
-              }
-              resolve(stdout);
-            });
-          });
 
-          if (tool === "protect-pdf") {
-            await run("qpdf", [
-              "--encrypt", "", password, "256",
-              "--",
-              inputPath,
-              outputPath
-            ]);
+          const run =
+            (
+              command,
+              args,
+              timeout = 300000
+            ) =>
+              new Promise(
+                (
+                  resolve,
+                  reject
+                ) => {
+
+                  execFile(
+                    command,
+                    args,
+                    {
+                      timeout,
+                      maxBuffer:
+                        50 * 1024 * 1024
+                    },
+
+                    (
+                      error,
+                      stdout,
+                      stderr
+                    ) => {
+
+                      if (error) {
+
+                        reject(
+                          new Error(
+                            (
+                              stderr ||
+                              error.message ||
+                              `${command} failed`
+                            ).trim()
+                          )
+                        );
+
+                        return;
+
+                      }
+
+                      resolve(
+                        stdout
+                      );
+
+                    }
+                  );
+
+                }
+              );
+
+
+          // ------------------------------------------------
+          // PROTECT PDF
+          // ------------------------------------------------
+
+          if (
+            tool === "protect-pdf"
+          ) {
+
+            await run(
+              "qpdf",
+
+              [
+                "--encrypt",
+                "",
+                password,
+                "256",
+                "--",
+                inputPath,
+                outputPath
+              ]
+            );
+
           }
 
-          if (tool === "unlock-pdf") {
-            if (password) {
-              await run("qpdf", ["--password=" + password, "--decrypt", inputPath, outputPath]);
+
+          // ------------------------------------------------
+          // UNLOCK PDF
+          // ------------------------------------------------
+
+          if (
+            tool === "unlock-pdf"
+          ) {
+
+            if (
+              password
+            ) {
+
+              await run(
+                "qpdf",
+
+                [
+                  "--password=" +
+                    password,
+
+                  "--decrypt",
+
+                  inputPath,
+
+                  outputPath
+                ]
+              );
+
             } else {
-              await run("qpdf", ["--decrypt", inputPath, outputPath]);
+
+              await run(
+                "qpdf",
+
+                [
+                  "--decrypt",
+
+                  inputPath,
+
+                  outputPath
+                ]
+              );
+
             }
+
           }
 
-          if (tool === "ocr-pdf") {
-            await run("ocrmypdf", [
-              "--force-ocr",
-              "--deskew",
-              "--optimize", "1",
-              inputPath,
+
+          // ------------------------------------------------
+          // OCR PDF
+          // ------------------------------------------------
+
+          if (
+            tool === "ocr-pdf"
+          ) {
+
+            await run(
+              "ocrmypdf",
+
+              [
+                "--force-ocr",
+
+                "--deskew",
+
+                "--optimize",
+                "1",
+
+                inputPath,
+
+                outputPath
+              ],
+
+              600000
+            );
+
+          }
+
+
+          if (
+            !fs.existsSync(
               outputPath
-            ], 600000);
+            ) ||
+            fs.statSync(
+              outputPath
+            ).size < 100
+          ) {
+
+            throw new Error(
+              "Output PDF was not created correctly."
+            );
+
           }
 
-          if (!fs.existsSync(outputPath) || fs.statSync(outputPath).size < 100) {
-            throw new Error("Output PDF was not created correctly.");
-          }
 
-          jobs.set(jobId, {
-            status:"finished",
-            outputPath,
-            filename:outputFilename,
-            error:null
-          });
+          jobs.set(
+            jobId,
+            {
 
-        } catch(error) {
+              status:
+                "finished",
 
-          console.error(`${tool} error:`, error);
+              outputPath,
 
-          jobs.set(jobId, {
-            status:"error",
-            outputPath:null,
-            filename:outputFilename,
-            error:error.message || `${tool} failed.`
-          });
+              filename:
+                outputFilename,
+
+              error:
+                null
+
+            }
+          );
+
+
+        } catch (
+          error
+        ) {
+
+          console.error(
+            `${tool} error:`,
+            error
+          );
+
+
+          jobs.set(
+            jobId,
+            {
+
+              status:
+                "error",
+
+              outputPath:
+                null,
+
+              filename:
+                outputFilename,
+
+              error:
+                error.message ||
+                `${tool} failed.`
+
+            }
+          );
 
         }
 
-        try { fs.unlinkSync(inputPath); } catch {}
 
-        setTimeout(() => {
-          jobs.delete(jobId);
-          cleanupDirectory(jobDir);
-        }, 10 * 60 * 1000);
+        try {
+
+          fs.unlinkSync(
+            inputPath
+          );
+
+        } catch {}
+
+
+        setTimeout(
+          () => {
+
+            jobs.delete(
+              jobId
+            );
+
+            cleanupDirectory(
+              jobDir
+            );
+
+          },
+
+          10 * 60 * 1000
+        );
+
 
         return;
+
       }
 
 
@@ -1829,7 +2148,8 @@ app.post(
       fs.mkdirSync(
         jobProfileDir,
         {
-          recursive: true
+          recursive:
+            true
         }
       );
 
@@ -1904,6 +2224,7 @@ app.post(
 
       // ==================================================
       // PDF -> POWERPOINT
+      // COMPRESSED VERSION
       // ==================================================
 
       else if (
@@ -1929,6 +2250,10 @@ app.post(
             );
 
 
+          // ------------------------------------------------
+          // RENDER PDF AT 120 DPI
+          // ------------------------------------------------
+
           await new Promise(
             (
               resolve,
@@ -1936,14 +2261,12 @@ app.post(
             ) => {
 
               execFile(
-
                 "pdftoppm",
 
                 [
                   "-png",
 
                   "-r",
-
                   "120",
 
                   inputPath,
@@ -1952,13 +2275,11 @@ app.post(
                 ],
 
                 {
-
                   timeout:
                     180000,
 
                   maxBuffer:
                     50 * 1024 * 1024
-
                 },
 
                 (
@@ -1967,7 +2288,9 @@ app.post(
                   stderr
                 ) => {
 
-                  if (error) {
+                  if (
+                    error
+                  ) {
 
                     reject(
                       new Error(
@@ -1981,54 +2304,59 @@ app.post(
 
                   }
 
+
                   resolve();
 
                 }
-
               );
 
             }
           );
 
 
+          // ------------------------------------------------
+          // FIND RENDERED PAGES
+          // ------------------------------------------------
+
           const pageFiles =
-            fs.readdirSync(
-              pptTempDir
-            )
-            .filter(
-              file =>
-                /^page-\d+\.png$/i.test(
-                  file
-                )
-            )
-            .sort(
-              (
-                a,
-                b
-              ) => {
+            fs
+              .readdirSync(
+                pptTempDir
+              )
+              .filter(
+                file =>
+                  /^page-\d+\.png$/i.test(
+                    file
+                  )
+              )
+              .sort(
+                (
+                  a,
+                  b
+                ) => {
 
-                const na =
-                  parseInt(
-                    a.match(
-                      /\d+/
-                    )[0],
-                    10
-                  );
-
-
-                const nb =
-                  parseInt(
-                    b.match(
-                      /\d+/
-                    )[0],
-                    10
-                  );
+                  const na =
+                    parseInt(
+                      a.match(
+                        /\d+/
+                      )[0],
+                      10
+                    );
 
 
-                return na - nb;
+                  const nb =
+                    parseInt(
+                      b.match(
+                        /\d+/
+                      )[0],
+                      10
+                    );
 
-              }
-            );
+
+                  return na - nb;
+
+                }
+              );
 
 
           if (
@@ -2043,7 +2371,121 @@ app.post(
 
 
           // ------------------------------------------------
-          // KEEP EXISTING PDF -> PPT WORKING
+          // COMPRESS EACH PAGE TO JPEG
+          // ------------------------------------------------
+
+          const compressedFiles =
+            [];
+
+
+          for (
+            let i = 0;
+            i < pageFiles.length;
+            i++
+          ) {
+
+            const pngPath =
+              path.join(
+                pptTempDir,
+                pageFiles[i]
+              );
+
+
+            const jpgPath =
+              path.join(
+                pptTempDir,
+                `compressed-${i + 1}.jpg`
+              );
+
+
+            await new Promise(
+              (
+                resolve,
+                reject
+              ) => {
+
+                execFile(
+                  "convert",
+
+                  [
+                    pngPath,
+
+                    "-strip",
+
+                    "-sampling-factor",
+                    "4:2:0",
+
+                    "-interlace",
+                    "Plane",
+
+                    "-quality",
+                    "70",
+
+                    jpgPath
+                  ],
+
+                  {
+                    timeout:
+                      60000,
+
+                    maxBuffer:
+                      50 * 1024 * 1024
+                  },
+
+                  (
+                    error,
+                    stdout,
+                    stderr
+                  ) => {
+
+                    if (
+                      error
+                    ) {
+
+                      reject(
+                        new Error(
+                          stderr?.trim() ||
+                          error.message ||
+                          "Image compression failed."
+                        )
+                      );
+
+                      return;
+
+                    }
+
+
+                    resolve();
+
+                  }
+                );
+
+              }
+            );
+
+
+            if (
+              !fs.existsSync(
+                jpgPath
+              )
+            ) {
+
+              throw new Error(
+                "Compressed image was not created."
+              );
+
+            }
+
+
+            compressedFiles.push(
+              jpgPath
+            );
+
+          }
+
+
+          // ------------------------------------------------
+          // CREATE POWERPOINT
           // ------------------------------------------------
 
           const pptx =
@@ -2088,486 +2530,195 @@ app.post(
             "en-US";
 
 
+          // ------------------------------------------------
+          // ADD COMPRESSED IMAGES
+          // ------------------------------------------------
+
           for (
-            const pageFile
-            of pageFiles
+            const jpgPath
+            of compressedFiles
           ) {
-
-            const pagePath =
-              path.join(
-                pptTempDir,
-                pageFile
-              );
-
 
             const slide =
               pptx.addSlide();
 
 
             slide.background = {
+
               color:
                 "FFFFFF"
+
             };
 
 
             slide.addImage({
 
               path:
-                pagePath,
-// ==================================================
-// PDF -> POWERPOINT
-// COMPRESSED VERSION
-// ==================================================
+                jpgPath,
 
-else if (
-  tool ===
-  "pdf-to-powerpoint"
-) {
+              x:
+                0,
 
-  const pptTempDir =
-    fs.mkdtempSync(
-      path.join(
-        os.tmpdir(),
-        "pdf-ppt-"
-      )
-    );
+              y:
+                0,
 
-  try {
+              w:
+                10,
 
-    const prefix =
-      path.join(
-        pptTempDir,
-        "page"
-      );
+              h:
+                5.625
 
-    // --------------------------------------------------
-    // PDF -> PNG
-    // Keep 120 DPI so existing quality remains good
-    // --------------------------------------------------
-
-    await new Promise(
-      (
-        resolve,
-        reject
-      ) => {
-
-        execFile(
-          "pdftoppm",
-
-          [
-            "-png",
-            "-r",
-            "120",
-            inputPath,
-            prefix
-          ],
-
-          {
-            timeout:
-              180000,
-
-            maxBuffer:
-              50 * 1024 * 1024
-          },
-
-          (
-            error,
-            stdout,
-            stderr
-          ) => {
-
-            if (error) {
-
-              reject(
-                new Error(
-                  stderr?.trim() ||
-                  error.message ||
-                  "PDF rendering failed."
-                )
-              );
-
-              return;
-
-            }
-
-            resolve();
+            });
 
           }
-        );
 
-      }
-    );
 
-    // --------------------------------------------------
-    // FIND PNG PAGES
-    // --------------------------------------------------
+          // ------------------------------------------------
+          // WRITE PPTX
+          // ------------------------------------------------
 
-    const pageFiles =
-      fs
-        .readdirSync(
-          pptTempDir
-        )
-        .filter(
-          file =>
-            /^page-\d+\.png$/i.test(
-              file
+          await pptx.writeFile({
+
+            fileName:
+              outputPath
+
+          });
+
+
+          if (
+            !fs.existsSync(
+              outputPath
             )
-        )
-        .sort(
-          (
-            a,
-            b
-          ) => {
+          ) {
 
-            const na =
-              parseInt(
-                a.match(
-                  /\d+/
-                )[0],
-                10
-              );
-
-            const nb =
-              parseInt(
-                b.match(
-                  /\d+/
-                )[0],
-                10
-              );
-
-            return na - nb;
+            throw new Error(
+              "PowerPoint output was not created."
+            );
 
           }
-        );
 
-    if (
-      !pageFiles.length
-    ) {
 
-      throw new Error(
-        "No PDF pages were rendered."
-      );
+          const stat =
+            fs.statSync(
+              outputPath
+            );
 
-    }
 
-    // --------------------------------------------------
-    // CREATE COMPRESSED JPG FILES
-    // --------------------------------------------------
+          if (
+            !stat.isFile() ||
+            stat.size < 10000
+          ) {
 
-    const compressedFiles = [];
+            throw new Error(
+              "PowerPoint output is invalid."
+            );
 
-    for (
-      let i = 0;
-      i < pageFiles.length;
-      i++
-    ) {
+          }
 
-      const pngPath =
-        path.join(
-          pptTempDir,
-          pageFiles[i]
-        );
 
-      const jpgPath =
-        path.join(
-          pptTempDir,
-          `compressed-${i + 1}.jpg`
-        );
-
-      await new Promise(
-        (
-          resolve,
-          reject
-        ) => {
-
-          execFile(
-            "convert",
-
-            [
-              pngPath,
-
-              "-strip",
-
-              "-sampling-factor",
-              "4:2:0",
-
-              "-interlace",
-              "Plane",
-
-              "-quality",
-              "70",
-
-              jpgPath
-            ],
-
+          jobs.set(
+            jobId,
             {
-              timeout:
-                60000,
 
-              maxBuffer:
-                50 * 1024 * 1024
-            },
+              status:
+                "finished",
 
-            (
-              error,
-              stdout,
-              stderr
-            ) => {
+              outputPath:
+                outputPath,
 
-              if (error) {
+              filename:
+                outputFilename,
 
-                reject(
-                  new Error(
-                    stderr?.trim() ||
-                    error.message ||
-                    "Image compression failed."
-                  )
-                );
-
-                return;
-
-              }
-
-              resolve();
+              error:
+                null
 
             }
           );
 
+
+          console.log(
+            "PDF -> POWERPOINT FINISHED:",
+            outputPath
+          );
+
+
+          console.log(
+            "PPTX size:",
+            stat.size,
+            "bytes"
+          );
+
+
+        } catch (
+          error
+        ) {
+
+          console.error(
+            "PDF -> POWERPOINT error:",
+            error
+          );
+
+
+          jobs.set(
+            jobId,
+            {
+
+              status:
+                "error",
+
+              outputPath:
+                null,
+
+              filename:
+                outputFilename,
+
+              error:
+                error.message ||
+                "PDF to PowerPoint conversion failed."
+
+            }
+          );
+
+
+        } finally {
+
+          cleanupDirectory(
+            pptTempDir
+          );
+
         }
-      );
 
-      if (
-        !fs.existsSync(
-          jpgPath
-        )
-      ) {
 
-        throw new Error(
-          "Compressed image was not created."
+        try {
+
+          fs.unlinkSync(
+            inputPath
+          );
+
+        } catch {}
+
+
+        setTimeout(
+          () => {
+
+            jobs.delete(
+              jobId
+            );
+
+            cleanupDirectory(
+              jobDir
+            );
+
+          },
+
+          10 * 60 * 1000
         );
 
-      }
 
-      compressedFiles.push(
-        jpgPath
-      );
-
-    }
-
-    // --------------------------------------------------
-    // CREATE POWERPOINT
-    // --------------------------------------------------
-
-    const pptx =
-      new pptxgen();
-
-    pptx.defineLayout({
-      name:
-        "PDF_PAGE",
-
-      width:
-        10,
-
-      height:
-        5.625
-    });
-
-    pptx.layout =
-      "PDF_PAGE";
-
-    pptx.author =
-      "iLovePDF4";
-
-    pptx.subject =
-      "PDF to PowerPoint";
-
-    pptx.title =
-      outputFilename;
-
-    pptx.company =
-      "iLovePDF4";
-
-    pptx.lang =
-      "en-US";
-
-    // --------------------------------------------------
-    // ADD COMPRESSED JPG TO EACH SLIDE
-    // --------------------------------------------------
-
-    for (
-      const jpgPath
-      of compressedFiles
-    ) {
-
-      const slide =
-        pptx.addSlide();
-
-      slide.background = {
-        color:
-          "FFFFFF"
-      };
-
-      slide.addImage({
-
-        path:
-          jpgPath,
-
-        x:
-          0,
-
-        y:
-          0,
-
-        w:
-          10,
-
-        h:
-          5.625
-
-      });
-
-    }
-
-    // --------------------------------------------------
-    // WRITE PPTX
-    // --------------------------------------------------
-
-    await pptx.writeFile({
-
-      fileName:
-        outputPath
-
-    });
-
-    // --------------------------------------------------
-    // VERIFY OUTPUT
-    // --------------------------------------------------
-
-    if (
-      !fs.existsSync(
-        outputPath
-      )
-    ) {
-
-      throw new Error(
-        "PowerPoint output was not created."
-      );
-
-    }
-
-    const stat =
-      fs.statSync(
-        outputPath
-      );
-
-    if (
-      !stat.isFile() ||
-      stat.size < 10000
-    ) {
-
-      throw new Error(
-        "PowerPoint output is invalid."
-      );
-
-    }
-
-    jobs.set(
-      jobId,
-      {
-
-        status:
-          "finished",
-
-        outputPath:
-          outputPath,
-
-        filename:
-          outputFilename,
-
-        error:
-          null
+        return;
 
       }
-    );
 
-    console.log(
-      "PDF -> POWERPOINT FINISHED:",
-      outputPath
-    );
-
-    console.log(
-      "PPTX size:",
-      stat.size,
-      "bytes"
-    );
-
-  } catch (
-    error
-  ) {
-
-    console.error(
-      "PDF -> POWERPOINT error:",
-      error
-    );
-
-    jobs.set(
-      jobId,
-      {
-
-        status:
-          "error",
-
-        outputPath:
-          null,
-
-        filename:
-          outputFilename,
-
-        error:
-          error.message ||
-          "PDF to PowerPoint conversion failed."
-
-      }
-    );
-
-  } finally {
-
-    cleanupDirectory(
-      pptTempDir
-    );
-
-  }
-
-  try {
-
-    fs.unlinkSync(
-      inputPath
-    );
-
-  } catch {}
-
-  setTimeout(
-    () => {
-
-      jobs.delete(
-        jobId
-      );
-
-      cleanupDirectory(
-        jobDir
-      );
-
-    },
-
-    10 * 60 * 1000
-  );
-
-  return;
-
-}
-
-
-    
 
       // ==================================================
       // PDF -> EXCEL
@@ -2628,495 +2779,3 @@ else if (
         return;
 
       }
-
-
-      // ==================================================
-      // LIBREOFFICE OUTPUT
-      // ==================================================
-
-      libreOfficeArgs.push(
-
-        "--outdir",
-
-        jobOutputDir,
-
-        inputPath
-
-      );
-
-
-      console.log(
-        "Running LibreOffice..."
-      );
-
-
-      console.log(
-        "Arguments:",
-        libreOfficeArgs
-      );
-
-
-      let finished =
-        false;
-
-
-      // ==================================================
-      // RUN LIBREOFFICE
-      // ==================================================
-
-      const child =
-        execFile(
-
-          "libreoffice",
-
-          libreOfficeArgs,
-
-          {
-
-            timeout:
-              120000,
-
-            maxBuffer:
-              50 * 1024 * 1024
-
-          },
-
-          (
-            error,
-            stdout,
-            stderr
-          ) => {
-
-
-            console.log(
-              "LibreOffice stdout:",
-              stdout || ""
-            );
-
-
-            console.log(
-              "LibreOffice stderr:",
-              stderr || ""
-            );
-
-
-            if (
-              finished
-            ) {
-
-              return;
-
-            }
-
-
-            // ------------------------------------------------
-            // FIND OUTPUT
-            // ------------------------------------------------
-
-            const outputFile =
-              findOutputFile(
-
-                jobOutputDir,
-
-                conversion.extension
-
-              );
-
-
-            if (
-              outputFile
-            ) {
-
-              try {
-
-                const stat =
-                  fs.statSync(
-                    outputFile
-                  );
-
-
-                console.log(
-                  "Output file found:",
-                  outputFile
-                );
-
-
-                console.log(
-                  "Output size:",
-                  stat.size,
-                  "bytes"
-                );
-
-
-                if (
-                  stat.isFile() &&
-                  stat.size >= 1000
-                ) {
-
-                  finished =
-                    true;
-
-
-                  jobs.set(
-                    jobId,
-                    {
-
-                      status:
-                        "finished",
-
-                      outputPath:
-                        outputFile,
-
-                      filename:
-                        outputFilename,
-
-                      error:
-                        null
-
-                    }
-                  );
-
-
-                  console.log(
-                    "CONVERSION FINISHED:",
-                    outputFile
-                  );
-
-
-                  try {
-
-                    fs.unlinkSync(
-                      inputPath
-                    );
-
-                  } catch {}
-
-
-                  cleanupDirectory(
-                    jobProfileDir
-                  );
-
-
-                  return;
-
-                }
-
-
-              } catch (
-                outputCheckError
-              ) {
-
-                console.error(
-                  "Output check failed:",
-                  outputCheckError.message
-                );
-
-              }
-
-            }
-
-
-            // ------------------------------------------------
-            // ERROR
-            // ------------------------------------------------
-
-            finished =
-              true;
-
-
-            jobs.set(
-              jobId,
-              {
-
-                status:
-                  "error",
-
-                outputPath:
-                  null,
-
-                filename:
-                  outputFilename,
-
-                error:
-                  getLibreOfficeError(
-                    tool,
-                    stderr,
-                    error
-                  )
-
-              }
-            );
-
-
-            try {
-
-              fs.unlinkSync(
-                inputPath
-              );
-
-            } catch {}
-
-
-            cleanupDirectory(
-              jobProfileDir
-            );
-
-          }
-
-        );
-
-
-      // ==================================================
-      // TIMEOUT SAFETY
-      // ==================================================
-
-      setTimeout(
-        () => {
-
-          if (
-            finished
-          ) {
-
-            return;
-
-          }
-
-
-          finished =
-            true;
-
-
-          try {
-
-            if (
-              child &&
-              !child.killed
-            ) {
-
-              child.kill(
-                "SIGKILL"
-              );
-
-            }
-
-          } catch {}
-
-
-          jobs.set(
-            jobId,
-            {
-
-              status:
-                "error",
-
-              outputPath:
-                null,
-
-              filename:
-                outputFilename,
-
-              error:
-                "LibreOffice conversion timed out."
-
-            }
-          );
-
-
-          try {
-
-            fs.unlinkSync(
-              inputPath
-            );
-
-          } catch {}
-
-
-          cleanupDirectory(
-            jobProfileDir
-          );
-
-
-        },
-
-        125000
-
-      );
-
-
-      // ==================================================
-      // JOB CLEANUP
-      // ==================================================
-
-      setTimeout(
-        () => {
-
-          jobs.delete(
-            jobId
-          );
-
-
-          cleanupDirectory(
-            jobDir
-          );
-
-
-          cleanupDirectory(
-            jobProfileDir
-          );
-
-
-        },
-
-        10 * 60 * 1000
-
-      );
-
-
-    } catch (
-      error
-    ) {
-
-      console.error(
-        "CONVERSION API ERROR:",
-        error
-      );
-
-
-      if (
-        !res.headersSent
-      ) {
-
-        return res.status(500).json({
-
-          success:
-            false,
-
-          error:
-            error.message ||
-            "Conversion failed."
-
-        });
-
-      }
-
-    }
-
-  }
-
-);
-
-// ==================================================
-// HEALTH CHECK
-// ==================================================
-
-app.get("/", (req, res) => {
-  res.status(200).json({
-    success: true,
-    service: "iLovePDF4 Free Conversion Engine",
-    status: "online"
-  });
-});
-// ==================================================
-// 404
-// ==================================================
-
-app.use(
-  (
-    req,
-    res
-  ) => {
-
-    res.status(404).json({
-
-      success:
-        false,
-
-      error:
-        "Endpoint not found."
-
-    });
-
-  }
-);
-
-
-// ==================================================
-// ERROR HANDLER
-// ==================================================
-
-app.use(
-  (
-    error,
-    req,
-    res,
-    next
-  ) => {
-
-    console.error(
-      "Express error:",
-      error
-    );
-
-
-    if (
-      res.headersSent
-    ) {
-
-      return next(
-        error
-      );
-
-    }
-
-
-    res.status(500).json({
-
-      success:
-        false,
-
-      error:
-        error.message ||
-        "Server error."
-
-    });
-
-  }
-);
-
-
-// ==================================================
-// SERVER
-// ==================================================
-
-const PORT =
-  process.env.PORT ||
-  10000;
-
-
-app.listen(
-
-  PORT,
-
-  "0.0.0.0",
-
-  () => {
-
-    console.log(
-      "================================="
-    );
-
-    console.log(
-      "iLovePDF4 Free Conversion Engine"
-    );
-
-    console.log(
-      `Running on port ${PORT}`
-    );
-
-    console.log(
-      "================================="
-    );
-
-  }
-
-);
