@@ -2114,94 +2114,457 @@ app.post(
 
               path:
                 pagePath,
+// ==================================================
+// PDF -> POWERPOINT
+// COMPRESSED VERSION
+// ==================================================
 
-              x:
-                0,
+else if (
+  tool ===
+  "pdf-to-powerpoint"
+) {
 
-              y:
-                0,
+  const pptTempDir =
+    fs.mkdtempSync(
+      path.join(
+        os.tmpdir(),
+        "pdf-ppt-"
+      )
+    );
 
-              w:
-                10,
+  try {
 
-              h:
-                5.625
+    const prefix =
+      path.join(
+        pptTempDir,
+        "page"
+      );
 
-            });
+    // --------------------------------------------------
+    // PDF -> PNG
+    // Keep 120 DPI so existing quality remains good
+    // --------------------------------------------------
+
+    await new Promise(
+      (
+        resolve,
+        reject
+      ) => {
+
+        execFile(
+          "pdftoppm",
+
+          [
+            "-png",
+            "-r",
+            "120",
+            inputPath,
+            prefix
+          ],
+
+          {
+            timeout:
+              180000,
+
+            maxBuffer:
+              50 * 1024 * 1024
+          },
+
+          (
+            error,
+            stdout,
+            stderr
+          ) => {
+
+            if (error) {
+
+              reject(
+                new Error(
+                  stderr?.trim() ||
+                  error.message ||
+                  "PDF rendering failed."
+                )
+              );
+
+              return;
+
+            }
+
+            resolve();
 
           }
+        );
 
+      }
+    );
 
-          await pptx.writeFile({
+    // --------------------------------------------------
+    // FIND PNG PAGES
+    // --------------------------------------------------
 
-            fileName:
-              outputPath
-
-          });
-
-
-          if (
-            !fs.existsSync(
-              outputPath
+    const pageFiles =
+      fs
+        .readdirSync(
+          pptTempDir
+        )
+        .filter(
+          file =>
+            /^page-\d+\.png$/i.test(
+              file
             )
-          ) {
+        )
+        .sort(
+          (
+            a,
+            b
+          ) => {
 
-            throw new Error(
-              "PowerPoint output was not created."
-            );
+            const na =
+              parseInt(
+                a.match(
+                  /\d+/
+                )[0],
+                10
+              );
+
+            const nb =
+              parseInt(
+                b.match(
+                  /\d+/
+                )[0],
+                10
+              );
+
+            return na - nb;
 
           }
+        );
 
+    if (
+      !pageFiles.length
+    ) {
 
-          const stat =
-            fs.statSync(
-              outputPath
-            );
+      throw new Error(
+        "No PDF pages were rendered."
+      );
 
+    }
 
-          if (
-            !stat.isFile() ||
-            stat.size < 10000
-          ) {
+    // --------------------------------------------------
+    // CREATE COMPRESSED JPG FILES
+    // --------------------------------------------------
 
-            throw new Error(
-              "PowerPoint output is invalid."
-            );
+    const compressedFiles = [];
 
-          }
+    for (
+      let i = 0;
+      i < pageFiles.length;
+      i++
+    ) {
 
+      const pngPath =
+        path.join(
+          pptTempDir,
+          pageFiles[i]
+        );
 
-          jobs.set(
-            jobId,
+      const jpgPath =
+        path.join(
+          pptTempDir,
+          `compressed-${i + 1}.jpg`
+        );
+
+      await new Promise(
+        (
+          resolve,
+          reject
+        ) => {
+
+          execFile(
+            "convert",
+
+            [
+              pngPath,
+
+              "-strip",
+
+              "-sampling-factor",
+              "4:2:0",
+
+              "-interlace",
+              "Plane",
+
+              "-quality",
+              "70",
+
+              jpgPath
+            ],
+
             {
+              timeout:
+                60000,
 
-              status:
-                "finished",
+              maxBuffer:
+                50 * 1024 * 1024
+            },
 
-              outputPath:
-                outputPath,
+            (
+              error,
+              stdout,
+              stderr
+            ) => {
 
-              filename:
-                outputFilename,
+              if (error) {
 
-              error:
-                null
+                reject(
+                  new Error(
+                    stderr?.trim() ||
+                    error.message ||
+                    "Image compression failed."
+                  )
+                );
+
+                return;
+
+              }
+
+              resolve();
 
             }
           );
 
+        }
+      );
 
-          console.log(
-            "PDF -> POWERPOINT FINISHED:",
-            outputPath
-          );
+      if (
+        !fs.existsSync(
+          jpgPath
+        )
+      ) {
 
+        throw new Error(
+          "Compressed image was not created."
+        );
 
-          console.log(
-            "PPTX size:",
-            stat.size,
-            "bytes"
-          );
+      }
+
+      compressedFiles.push(
+        jpgPath
+      );
+
+    }
+
+    // --------------------------------------------------
+    // CREATE POWERPOINT
+    // --------------------------------------------------
+
+    const pptx =
+      new pptxgen();
+
+    pptx.defineLayout({
+      name:
+        "PDF_PAGE",
+
+      width:
+        10,
+
+      height:
+        5.625
+    });
+
+    pptx.layout =
+      "PDF_PAGE";
+
+    pptx.author =
+      "iLovePDF4";
+
+    pptx.subject =
+      "PDF to PowerPoint";
+
+    pptx.title =
+      outputFilename;
+
+    pptx.company =
+      "iLovePDF4";
+
+    pptx.lang =
+      "en-US";
+
+    // --------------------------------------------------
+    // ADD COMPRESSED JPG TO EACH SLIDE
+    // --------------------------------------------------
+
+    for (
+      const jpgPath
+      of compressedFiles
+    ) {
+
+      const slide =
+        pptx.addSlide();
+
+      slide.background = {
+        color:
+          "FFFFFF"
+      };
+
+      slide.addImage({
+
+        path:
+          jpgPath,
+
+        x:
+          0,
+
+        y:
+          0,
+
+        w:
+          10,
+
+        h:
+          5.625
+
+      });
+
+    }
+
+    // --------------------------------------------------
+    // WRITE PPTX
+    // --------------------------------------------------
+
+    await pptx.writeFile({
+
+      fileName:
+        outputPath
+
+    });
+
+    // --------------------------------------------------
+    // VERIFY OUTPUT
+    // --------------------------------------------------
+
+    if (
+      !fs.existsSync(
+        outputPath
+      )
+    ) {
+
+      throw new Error(
+        "PowerPoint output was not created."
+      );
+
+    }
+
+    const stat =
+      fs.statSync(
+        outputPath
+      );
+
+    if (
+      !stat.isFile() ||
+      stat.size < 10000
+    ) {
+
+      throw new Error(
+        "PowerPoint output is invalid."
+      );
+
+    }
+
+    jobs.set(
+      jobId,
+      {
+
+        status:
+          "finished",
+
+        outputPath:
+          outputPath,
+
+        filename:
+          outputFilename,
+
+        error:
+          null
+
+      }
+    );
+
+    console.log(
+      "PDF -> POWERPOINT FINISHED:",
+      outputPath
+    );
+
+    console.log(
+      "PPTX size:",
+      stat.size,
+      "bytes"
+    );
+
+  } catch (
+    error
+  ) {
+
+    console.error(
+      "PDF -> POWERPOINT error:",
+      error
+    );
+
+    jobs.set(
+      jobId,
+      {
+
+        status:
+          "error",
+
+        outputPath:
+          null,
+
+        filename:
+          outputFilename,
+
+        error:
+          error.message ||
+          "PDF to PowerPoint conversion failed."
+
+      }
+    );
+
+  } finally {
+
+    cleanupDirectory(
+      pptTempDir
+    );
+
+  }
+
+  try {
+
+    fs.unlinkSync(
+      inputPath
+    );
+
+  } catch {}
+
+  setTimeout(
+    () => {
+
+      jobs.delete(
+        jobId
+      );
+
+      cleanupDirectory(
+        jobDir
+      );
+
+    },
+
+    10 * 60 * 1000
+  );
+
+  return;
+
+}
 
 
         } catch (
