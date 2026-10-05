@@ -1152,7 +1152,7 @@ const {
             new ImageRun({
 
               type:
-                "png",
+                "jpg",
 
               data:
                 imageBuffer,
