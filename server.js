@@ -778,62 +778,60 @@ async function convertScannedPdfToDocx(
     // RENDER PDF
     // ==================================================
 
-    await new Promise(
-      (resolve, reject) => {
+        // ==================================================
+    // RENDER PDF - PDF -> WORD ONLY
+    // ==================================================
 
+    async function renderPdf(command) {
+      return new Promise((resolve, reject) => {
         execFile(
-          "pdftoppm",
-
+          command,
           [
             "-png",
-
             "-r",
-
             "72",
-
             inputPath,
-
             prefix
           ],
-
           {
-
-            timeout:
-              30000,
-
-            maxBuffer:
-              50 * 1024 * 1024
-
+            timeout: 30000,
+            maxBuffer: 50 * 1024 * 1024
           },
-
-          (
-            error,
-            stdout,
-            stderr
-          ) => {
-
+          (error, stdout, stderr) => {
             if (error) {
-
               reject(
                 new Error(
                   stderr?.trim() ||
                   error.message ||
-                  "PDF rendering failed."
+                  `${command} rendering failed.`
                 )
               );
-
               return;
-
             }
 
             resolve();
-
           }
-
         );
+      });
+    }
 
+    try {
+      await renderPdf("pdftocairo");
+      console.log("PDF rendered using pdftocairo.");
+    } catch (firstError) {
+      console.log(
+        "pdftocairo failed. Trying pdftoppm..."
+      );
+
+      try {
+        await renderPdf("pdftoppm");
+        console.log("PDF rendered using pdftoppm.");
+      } catch (secondError) {
+        throw new Error(
+          "PDF rendering failed. Both pdftocairo and pdftoppm failed."
+        );
       }
-    );
+    }
 
 
     // ==================================================
