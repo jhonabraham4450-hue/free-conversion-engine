@@ -2567,75 +2567,7 @@ else if (
 }
 
 
-        } catch (
-          error
-        ) {
-
-          console.error(
-            "PDF -> POWERPOINT error:",
-            error
-          );
-
-
-          jobs.set(
-            jobId,
-            {
-
-              status:
-                "error",
-
-              outputPath:
-                null,
-
-              filename:
-                outputFilename,
-
-              error:
-                error.message ||
-                "PDF to PowerPoint conversion failed."
-
-            }
-          );
-
-
-        } finally {
-
-          cleanupDirectory(
-            pptTempDir
-          );
-
-        }
-
-
-        try {
-
-          fs.unlinkSync(
-            inputPath
-          );
-
-        } catch {}
-
-
-        setTimeout(
-          () => {
-
-            jobs.delete(
-              jobId
-            );
-
-            cleanupDirectory(
-              jobDir
-            );
-
-          },
-          10 * 60 * 1000
-        );
-
-
-        return;
-
-      }
-
+    
 
       // ==================================================
       // PDF -> EXCEL
