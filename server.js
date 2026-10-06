@@ -2865,20 +2865,430 @@ app.post(
       // PDF -> EXCEL
       // ==================================================
 
-      else if (
-        tool ===
-        "pdf-to-excel"
-      ) {
+      else if (tool === "pdf-to-excel") {
 
-        libreOfficeArgs.push(
-          "xlsx:Calc MS Excel 2007 XML"
+  try {
+
+    console.log("=================================");
+    console.log("PDF -> EXCEL");
+    console.log("Input:", inputPath);
+    console.log("=================================");
+
+    // ==========================================
+    // STEP 1
+    // Extract selectable PDF text
+    // ==========================================
+
+    let pdfText = "";
+
+    try {
+
+      pdfText = await new Promise((resolve, reject) => {
+
+        execFile(
+          "pdftotext",
+          [
+            "-layout",
+            "-enc",
+            "UTF-8",
+            inputPath,
+            "-"
+          ],
+          {
+            timeout: 120000,
+            maxBuffer: 100 * 1024 * 1024
+          },
+          (error, stdout, stderr) => {
+
+            if (error) {
+
+              reject(
+                new Error(
+                  stderr?.trim() ||
+                  error.message ||
+                  "PDF text extraction failed."
+                )
+              );
+
+              return;
+            }
+
+            resolve(stdout || "");
+
+          }
         );
 
-        libreOfficeArgs.push(
-          "--infilter=draw_pdf_import"
+      });
+
+    } catch (error) {
+
+      console.log(
+        "pdftotext failed:",
+        error.message
+      );
+
+    }
+
+    // ==========================================
+    // STEP 2
+    // OCR fallback for scanned PDF
+    // ==========================================
+
+    if (!String(pdfText).trim()) {
+
+      console.log(
+        "No selectable text found."
+      );
+
+      console.log(
+        "Starting OCR fallback..."
+      );
+
+      const ocrPdfPath =
+        path.join(
+          jobDir,
+          "ocr-input.pdf"
+        );
+
+      await new Promise((resolve, reject) => {
+
+        execFile(
+          "ocrmypdf",
+          [
+            "--force-ocr",
+            "--deskew",
+            "--optimize",
+            "1",
+            inputPath,
+            ocrPdfPath
+          ],
+          {
+            timeout: 600000,
+            maxBuffer: 50 * 1024 * 1024
+          },
+          (error, stdout, stderr) => {
+
+            if (error) {
+
+              reject(
+                new Error(
+                  stderr?.trim() ||
+                  error.message ||
+                  "OCR failed."
+                )
+              );
+
+              return;
+            }
+
+            resolve();
+
+          }
+        );
+
+      });
+
+      pdfText = await new Promise((resolve, reject) => {
+
+        execFile(
+          "pdftotext",
+          [
+            "-layout",
+            "-enc",
+            "UTF-8",
+            ocrPdfPath,
+            "-"
+          ],
+          {
+            timeout: 120000,
+            maxBuffer: 100 * 1024 * 1024
+          },
+          (error, stdout, stderr) => {
+
+            if (error) {
+
+              reject(
+                new Error(
+                  stderr?.trim() ||
+                  error.message ||
+                  "OCR text extraction failed."
+                )
+              );
+
+              return;
+            }
+
+            resolve(stdout || "");
+
+          }
+        );
+
+      });
+
+    }
+
+    // ==========================================
+    // STEP 3
+    // Validate extracted text
+    // ==========================================
+
+    pdfText = String(
+      pdfText || ""
+    ).replace(/\r/g, "");
+
+    if (!pdfText.trim()) {
+
+      throw new Error(
+        "No readable text could be extracted from this PDF."
+      );
+
+    }
+
+    // ==========================================
+    // STEP 4
+    // Create XLSX workbook
+    // ==========================================
+
+    const workbook =
+      XLSX.utils.book_new();
+
+    const pages =
+      pdfText
+        .split("\f")
+        .map(page =>
+          page.trim()
+        )
+        .filter(Boolean);
+
+    if (!pages.length) {
+
+      throw new Error(
+        "No PDF pages could be converted."
+      );
+
+    }
+
+    pages.forEach(
+      (pageText, pageIndex) => {
+
+        const rows =
+          pageText
+            .split("\n")
+            .map(line =>
+              line.trimEnd()
+            )
+            .filter(line =>
+              line.trim()
+            )
+            .map(line => {
+
+              const trimmed =
+                line.trim();
+
+              // Detect columns from
+              // layout-preserved spaces.
+              const columns =
+                trimmed.split(
+                  /\s{2,}/
+                );
+
+              return columns.length
+                ? columns
+                : [trimmed];
+
+            });
+
+        if (!rows.length) {
+          rows.push([""]);
+        }
+
+        const worksheet =
+          XLSX.utils.aoa_to_sheet(
+            rows
+          );
+
+        // ======================================
+        // Column widths
+        // ======================================
+
+        const maxColumns =
+          Math.max(
+            1,
+            ...rows.map(
+              row => row.length
+            )
+          );
+
+        worksheet["!cols"] =
+          Array.from(
+            {
+              length: maxColumns
+            },
+            (_, columnIndex) => {
+
+              let maxLength = 12;
+
+              for (
+                const row of rows
+              ) {
+
+                const value =
+                  row[columnIndex];
+
+                if (
+                  value !== undefined &&
+                  value !== null
+                ) {
+
+                  maxLength =
+                    Math.max(
+                      maxLength,
+                      String(value).length
+                    );
+
+                }
+
+              }
+
+              return {
+                wch:
+                  Math.min(
+                    45,
+                    maxLength + 2
+                  )
+              };
+
+            }
+          );
+
+        const sheetName =
+          `Page ${pageIndex + 1}`;
+
+        XLSX.utils.book_append_sheet(
+          workbook,
+          worksheet,
+          sheetName.substring(0, 31)
         );
 
       }
+    );
+
+    // ==========================================
+    // STEP 5
+    // Write XLSX
+    // ==========================================
+
+    XLSX.writeFile(
+      workbook,
+      outputPath,
+      {
+        bookType: "xlsx"
+      }
+    );
+
+    // ==========================================
+    // STEP 6
+    // Validate output
+    // ==========================================
+
+    if (
+      !fs.existsSync(outputPath)
+    ) {
+
+      throw new Error(
+        "Excel output file was not created."
+      );
+
+    }
+
+    const outputStat =
+      fs.statSync(
+        outputPath
+      );
+
+    if (
+      !outputStat.isFile() ||
+      outputStat.size < 100
+    ) {
+
+      throw new Error(
+        "Excel output file is empty or invalid."
+      );
+
+    }
+
+    console.log(
+      "PDF -> EXCEL completed."
+    );
+
+    console.log(
+      "Excel size:",
+      outputStat.size,
+      "bytes"
+    );
+
+    // ==========================================
+    // FINISHED
+    // ==========================================
+
+    jobs.set(
+      jobId,
+      {
+        status: "finished",
+        outputPath,
+        filename: outputFilename,
+        error: null
+      }
+    );
+
+  } catch (error) {
+
+    console.error(
+      "PDF -> EXCEL error:",
+      error
+    );
+
+    jobs.set(
+      jobId,
+      {
+        status: "error",
+        outputPath: null,
+        filename: outputFilename,
+        error:
+          error.message ||
+          "PDF to Excel conversion failed."
+      }
+    );
+
+  }
+
+  // ==========================================
+  // CLEAN INPUT
+  // ==========================================
+
+  try {
+    fs.unlinkSync(inputPath);
+  } catch {}
+
+  // ==========================================
+  // CLEAN JOB AFTER 10 MINUTES
+  // ==========================================
+
+  setTimeout(
+    () => {
+
+      jobs.delete(jobId);
+
+      cleanupDirectory(
+        jobDir
+      );
+
+    },
+    10 * 60 * 1000
+  );
+
+  return;
+}
 
 
       // ==================================================
